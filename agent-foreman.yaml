@@ -23,8 +23,8 @@ executor:
 
 tests:
   commands:
-    - dotnet test
-    - npm --prefix frontend run build
+    - dotnet test /mnt/c/elevator-ads-mvp/backend/ElevatorAds.sln
+    - npm --prefix frontend/elevator-ads-admin run build
 
 safety:
   maxFilesChanged: 25

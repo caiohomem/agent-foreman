@@ -76,7 +76,12 @@ public sealed class CliGitRepository : IGitRepository
 
     public async Task PushAsync(string repoPath, string remote, string branch, CancellationToken cancellationToken = default)
     {
-        await RunGitAsync(repoPath, new[] { "push", remote, branch }, cancellationToken);
+        var result = await RunGitAsync(repoPath, new[] { "push", remote, branch }, cancellationToken);
+        if (!result.Success)
+        {
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(result.StderrText) ? "git push failed." : result.StderrText.Trim());
+        }
     }
 
     private Task<CommandResult> RunGitAsync(string repoPath, IReadOnlyList<string> arguments, CancellationToken cancellationToken)

@@ -18,11 +18,14 @@ public static class HelpText
           git       Inspect and manage the configured git repository.
           work-items Inspect configured work items.
           plan      Create a technical plan for a work item.
-          run-once  Run one ready work item. (future)
-          daemon    Watch for ready work items. (future)
-          status    Show mission status. (future)
-          resume    Resume a paused mission. (future)
-          cancel    Cancel a mission. (future)
+          execute   Execute a planned work item with Codex.
+          verify    Run safety checks and configured tests.
+          submit    Commit verified changes, push a branch and create a pull request.
+          run-once  Run one ready work item.
+          daemon    Watch for ready work items.
+          status    Show mission status.
+          resume    Resume a paused mission.
+          cancel    Cancel a mission.
           doctor    Check local prerequisites.
 
         """;

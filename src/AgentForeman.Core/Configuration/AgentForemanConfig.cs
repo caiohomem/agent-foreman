@@ -10,6 +10,7 @@ public sealed class AgentForemanConfig
     public SafetyConfig Safety { get; init; } = new();
     public QuotaConfig Quota { get; init; } = new();
     public DatabaseConfig Database { get; init; } = new();
+    public DaemonConfig Daemon { get; init; } = new();
 }
 
 public sealed class ProjectConfig
@@ -64,4 +65,11 @@ public sealed class DatabaseConfig
 {
     public string Provider { get; init; } = string.Empty;
     public string ConnectionString { get; init; } = string.Empty;
+}
+
+public sealed class DaemonConfig
+{
+    public bool Enabled { get; init; } = true;
+    public int PollIntervalSeconds { get; init; } = 300;
+    public bool RunOnStartup { get; init; } = true;
 }

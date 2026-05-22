@@ -170,18 +170,24 @@ internal sealed class PlanTestServices
 internal sealed class FakeWorkItemProvider : IWorkItemProvider
 {
     private readonly bool _exists;
+    private readonly IReadOnlyList<WorkItem> _readyItems;
 
-    public FakeWorkItemProvider(bool exists)
+    public FakeWorkItemProvider(bool exists, IReadOnlyList<WorkItem>? readyItems = null)
     {
         _exists = exists;
+        _readyItems = readyItems ?? Array.Empty<WorkItem>();
     }
 
     public string? RequestedId { get; private set; }
     public string? PausedReason { get; private set; }
+    public string? LastComment { get; private set; }
+    public bool MarkedAsReview { get; private set; }
+    public bool WorkingMarked { get; private set; }
+    public bool CreateInvoked { get; private set; }
 
     public Task<IReadOnlyList<WorkItem>> GetReadyItemsAsync(CancellationToken cancellationToken)
     {
-        return Task.FromResult<IReadOnlyList<WorkItem>>(Array.Empty<WorkItem>());
+        return Task.FromResult(_readyItems);
     }
 
     public Task<WorkItem> GetWorkItemAsync(string externalId, CancellationToken cancellationToken)
@@ -206,6 +212,7 @@ internal sealed class FakeWorkItemProvider : IWorkItemProvider
 
     public Task MarkAsWorkingAsync(WorkItem item, CancellationToken cancellationToken)
     {
+        WorkingMarked = true;
         return Task.CompletedTask;
     }
 
@@ -217,16 +224,19 @@ internal sealed class FakeWorkItemProvider : IWorkItemProvider
 
     public Task MarkAsReviewAsync(WorkItem item, string pullRequestUrl, CancellationToken cancellationToken)
     {
+        MarkedAsReview = true;
         return Task.CompletedTask;
     }
 
     public Task AddCommentAsync(WorkItem item, string comment, CancellationToken cancellationToken)
     {
+        LastComment = comment;
         return Task.CompletedTask;
     }
 
     public Task<WorkItem> CreateWorkItemAsync(CreateWorkItemRequest request, CancellationToken cancellationToken)
     {
+        CreateInvoked = true;
         throw new NotImplementedException();
     }
 }
@@ -254,6 +264,7 @@ internal sealed class FakeMissionRepository : IMissionRepository
     private readonly Dictionary<string, Mission> _missions = new();
 
     public List<Mission> Saved { get; } = new();
+    public int? LastRecentLimit { get; private set; }
 
     public Mission? GetById(string id)
     {
@@ -264,6 +275,24 @@ internal sealed class FakeMissionRepository : IMissionRepository
     {
         _missions[mission.Id] = mission;
         Saved.Add(mission);
+    }
+
+    public IReadOnlyList<Mission> GetRecent(int limit)
+    {
+        LastRecentLimit = limit;
+        return _missions.Values
+            .OrderByDescending(m => m.UpdatedAt)
+            .Take(limit)
+            .ToList();
+    }
+
+    public IReadOnlyList<Mission> GetByStatus(MissionStatus status, int limit)
+    {
+        return _missions.Values
+            .Where(m => m.Status == status)
+            .OrderByDescending(m => m.UpdatedAt)
+            .Take(limit)
+            .ToList();
     }
 }
 

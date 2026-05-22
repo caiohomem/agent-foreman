@@ -22,7 +22,6 @@
     <ProjectReference Include="..\..\src\AgentForeman.Cli\AgentForeman.Cli.csproj" />
     <ProjectReference Include="..\..\src\AgentForeman.Core\AgentForeman.Core.csproj" />
     <ProjectReference Include="..\..\src\AgentForeman.Infrastructure\AgentForeman.Infrastructure.csproj" />
-    <ProjectReference Include="..\AgentForeman.CommandTestHelper\AgentForeman.CommandTestHelper.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>
