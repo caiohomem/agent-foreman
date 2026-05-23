@@ -10,6 +10,7 @@ public interface IGitRepository
     Task<bool> BranchExistsAsync(string repoPath, string branch, CancellationToken cancellationToken = default);
     Task<GitStatusResult> GetStatusAsync(string repoPath, CancellationToken cancellationToken = default);
     Task<string> GetDiffAsync(string repoPath, CancellationToken cancellationToken = default);
+    Task<bool> HasOnlyLineEndingChangesAsync(string repoPath, CancellationToken cancellationToken = default);
     Task AddAllAsync(string repoPath, CancellationToken cancellationToken = default);
     Task<GitCommitResult> CommitAsync(string repoPath, string message, CancellationToken cancellationToken = default);
     Task PushAsync(string repoPath, string remote, string branch, CancellationToken cancellationToken = default);

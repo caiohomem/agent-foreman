@@ -57,6 +57,12 @@ public sealed class CliGitRepository : IGitRepository
         return result.StdoutText;
     }
 
+    public async Task<bool> HasOnlyLineEndingChangesAsync(string repoPath, CancellationToken cancellationToken = default)
+    {
+        var result = await RunGitAsync(repoPath, new[] { "diff", "--quiet", "--ignore-cr-at-eol", "--exit-code" }, cancellationToken);
+        return result.ExitCode == 0;
+    }
+
     public async Task AddAllAsync(string repoPath, CancellationToken cancellationToken = default)
     {
         await RunGitAsync(repoPath, new[] { "add", "--all" }, cancellationToken);

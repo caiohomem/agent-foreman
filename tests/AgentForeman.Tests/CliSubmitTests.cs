@@ -289,7 +289,8 @@ internal sealed class RecordingGitRepository : IGitRepository
         bool branchExists = false,
         bool commitCreated = true,
         bool pushThrows = false,
-        bool pullThrows = false)
+        bool pullThrows = false,
+        bool hasOnlyLineEndingChanges = false)
     {
         CurrentBranch = currentBranch;
         Status = hasChanges
@@ -299,12 +300,14 @@ internal sealed class RecordingGitRepository : IGitRepository
         CommitCreated = commitCreated;
         _pushThrows = pushThrows;
         _pullThrows = pullThrows;
+        HasOnlyLineEndingChangesResult = hasOnlyLineEndingChanges;
     }
 
     public string CurrentBranch { get; }
     public GitStatusResult Status { get; }
     public bool BranchExistsResult { get; }
     public bool CommitCreated { get; }
+    public bool HasOnlyLineEndingChangesResult { get; }
 
     public string? CreatedBranch { get; private set; }
     public string? CheckedOutBranch { get; private set; }
@@ -348,6 +351,9 @@ internal sealed class RecordingGitRepository : IGitRepository
 
     public Task<string> GetDiffAsync(string repoPath, CancellationToken cancellationToken = default) =>
         Task.FromResult(string.Empty);
+
+    public Task<bool> HasOnlyLineEndingChangesAsync(string repoPath, CancellationToken cancellationToken = default) =>
+        Task.FromResult(HasOnlyLineEndingChangesResult);
 
     public Task AddAllAsync(string repoPath, CancellationToken cancellationToken = default)
     {

@@ -16,8 +16,18 @@ public sealed class MissionBranchPreparer : IMissionBranchPreparer
 
         var status = await _gitRepository.GetStatusAsync(request.RepoPath, cancellationToken);
         if (status.ChangedFiles.Count > 0)
+        {
+            if (status.ChangedFiles.All(file => file.IsModified)
+                && await _gitRepository.HasOnlyLineEndingChangesAsync(request.RepoPath, cancellationToken))
+            {
+                return BranchPreparationResult.Fail(
+                    $"Cannot switch to {request.MissionBranch}: detected line-ending-only changes in {request.RepoPath}. " +
+                    "Normalize the checkout EOL policy before retrying. Recommended: add .gitattributes with LF rules and align Git autocrlf settings for the repo.");
+            }
+
             return BranchPreparationResult.Fail(
                 $"Cannot switch to {request.MissionBranch}: {status.ChangedFiles.Count} uncommitted change(s). Stash or commit them first.");
+        }
 
         await _gitRepository.CheckoutAsync(request.RepoPath, request.DefaultBranch, cancellationToken);
         try { await _gitRepository.PullAsync(request.RepoPath, "origin", request.DefaultBranch, cancellationToken); } catch { }

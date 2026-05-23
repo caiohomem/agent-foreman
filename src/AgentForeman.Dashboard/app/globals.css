@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f4f7fb;
+  --foreground: #172033;
+  --muted-foreground: #61708d;
+  --panel: rgba(255, 255, 255, 0.92);
+  --surface: rgba(247, 250, 255, 0.88);
+  --surface-strong: rgba(236, 242, 251, 0.96);
+  --panel-border: rgba(126, 146, 179, 0.18);
+  --panel-border-strong: rgba(108, 134, 176, 0.34);
+  --sidebar: #0e1728;
+  --sidebar-foreground: #e7eefb;
+  --sidebar-muted: #93a1bc;
+  --accent: #2f6df6;
+  --accent-strong: #1e56d0;
+  --success: #12805c;
+  --warning: #b96d12;
+  --danger: #c13d54;
+  --shadow-card: 0 20px 60px rgba(20, 34, 63, 0.08);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: "IBM Plex Sans", "Aptos", "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", "Cascadia Mono", "SFMono-Regular", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background:
+    radial-gradient(circle at top left, rgba(47, 109, 246, 0.08), transparent 28rem),
+    radial-gradient(circle at top right, rgba(17, 128, 92, 0.08), transparent 24rem),
+    linear-gradient(180deg, #f8fbff 0%, #f4f7fb 100%);
+}
+
+body {
+  min-height: 100vh;
+  background: transparent;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+code {
+  font-family: "IBM Plex Mono", "Cascadia Mono", "SFMono-Regular", monospace;
+}
+
+::selection {
+  background: rgba(47, 109, 246, 0.18);
+}

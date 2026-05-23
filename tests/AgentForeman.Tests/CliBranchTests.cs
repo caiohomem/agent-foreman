@@ -42,6 +42,25 @@ public sealed class CliBranchTests
     }
 
     [Fact]
+    public void BranchPreparer_LineEndingOnlyDirtyWorkdir_ReturnsActionablePolicyError()
+    {
+        var gitRepo = new RecordingGitRepository(
+            currentBranch: "main",
+            hasChanges: true,
+            hasOnlyLineEndingChanges: true);
+        var preparer = new MissionBranchPreparer(gitRepo);
+
+        var result = preparer.PrepareAsync(
+            new BranchPreparationRequest("/mnt/c/elevator-ads-mvp", "main", "agent/issue-42"),
+            CancellationToken.None).GetAwaiter().GetResult();
+
+        Assert.False(result.Success);
+        Assert.Contains("line-ending-only", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(".gitattributes", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("/mnt/c/elevator-ads-mvp", result.ErrorMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void BranchPreparer_CleanWorkdir_NonExistentBranch_CreatesMissionBranch()
     {
         var gitRepo = new RecordingGitRepository(currentBranch: "main", hasChanges: false, branchExists: false);

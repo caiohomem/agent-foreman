@@ -28,6 +28,7 @@ Future commands listed in help but not implemented yet:
 
 ```text
 src/
+  AgentForeman.Api/
   AgentForeman.Cli/
   AgentForeman.Core/
   AgentForeman.Infrastructure/
@@ -48,6 +49,45 @@ Run the CLI:
 
 ```bash
 dotnet run --project src/AgentForeman.Cli -- help
+```
+
+Run the API:
+
+```bash
+dotnet run --project src/AgentForeman.Api -- --config agent-foreman.yaml
+```
+
+Run the dashboard:
+
+```bash
+cd src/AgentForeman.Dashboard
+npm install
+npm run dev
+```
+
+To connect the dashboard to the API, set `AGENT_FOREMAN_API_BASE_URL`.
+Example:
+
+```bash
+AGENT_FOREMAN_API_BASE_URL=http://localhost:52888 npm run dev
+```
+
+## WSL Repo Policy
+
+If Agent Foreman runs inside WSL, prefer a WSL-native `project.repoPath` such as `~/src/project` instead of `/mnt/c/...`.
+
+To avoid dirty worktrees caused only by line-ending normalization, keep target repositories on `LF` and commit a `.gitattributes` policy such as:
+
+```gitattributes
+* text=auto
+*.cs text eol=lf
+*.csproj text eol=lf
+*.sln text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.sh text eol=lf
 ```
 
 ## Scope Guardrails

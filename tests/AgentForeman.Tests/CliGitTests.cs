@@ -104,6 +104,11 @@ internal sealed class FakeGitRepository : IGitRepository
         return Task.FromResult(Diff);
     }
 
+    public Task<bool> HasOnlyLineEndingChangesAsync(string repoPath, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(false);
+    }
+
     public Task AddAllAsync(string repoPath, CancellationToken cancellationToken = default)
     {
         return Task.CompletedTask;
