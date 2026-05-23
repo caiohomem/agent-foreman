@@ -18,6 +18,8 @@ public static class PostgresStateSchema
             updated_at TIMESTAMPTZ NOT NULL
         );
 
+        ALTER TABLE missions ADD COLUMN IF NOT EXISTS blocked_comment_posted_at TIMESTAMPTZ NULL;
+
         CREATE TABLE IF NOT EXISTS mission_runs (
             id TEXT PRIMARY KEY,
             mission_id TEXT NOT NULL,
@@ -37,6 +39,18 @@ public static class PostgresStateSchema
             sequence INTEGER NOT NULL,
             stream TEXT NOT NULL,
             content TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS mission_events (
+            id TEXT PRIMARY KEY,
+            mission_id TEXT NOT NULL,
+            external_work_item_id TEXT NULL,
+            run_id TEXT NULL,
+            event_type TEXT NOT NULL,
+            level TEXT NOT NULL,
+            message TEXT NOT NULL,
+            metadata_json JSONB NULL,
             created_at TIMESTAMPTZ NOT NULL
         );
 

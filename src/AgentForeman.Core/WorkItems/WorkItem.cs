@@ -9,4 +9,7 @@ public sealed record WorkItem(
     string Repository,
     IReadOnlyList<WorkItemLabel> Labels,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    IReadOnlyList<WorkItemDependency>? Dependencies = null,
+    WorkItemState State = WorkItemState.Open,
+    DateTimeOffset? ClosedAt = null);

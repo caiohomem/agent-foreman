@@ -1,6 +1,5 @@
 using AgentForeman.Cli;
 using AgentForeman.Core.Commands;
-using AgentForeman.Core.WorkItems;
 
 namespace AgentForeman.Tests;
 
@@ -16,13 +15,21 @@ public sealed class CliWorkItemsTests
               {
                 "number": 42,
                 "title": "Fix elevator ad pacing",
-                "body": "Issue body",
+                "body": "Depends on: #1",
                 "url": "https://github.com/caio/elevator-ads-mvp/issues/42",
                 "labels": [{"name": "agent-ready"}],
                 "createdAt": "2026-05-01T10:00:00Z",
                 "updatedAt": "2026-05-02T10:00:00Z"
               }
             ]
+            """,
+            """
+            {
+              "number": 1,
+              "state": "OPEN",
+              "title": "Base work",
+              "url": "https://github.com/caio/elevator-ads-mvp/issues/1"
+            }
             """);
 
         var result = CliApplication.Execute(
@@ -36,6 +43,9 @@ public sealed class CliWorkItemsTests
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("#42 Fix elevator ad pacing", result.Output);
         Assert.Contains("https://github.com/caio/elevator-ads-mvp/issues/42", result.Output);
+        Assert.Contains("Labels: agent-ready", result.Output);
+        Assert.Contains("Dependencies:", result.Output);
+        Assert.Contains("#1 open - unsatisfied", result.Output);
     }
 
     [Fact]

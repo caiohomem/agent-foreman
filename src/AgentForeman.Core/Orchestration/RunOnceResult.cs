@@ -10,5 +10,6 @@ public sealed record RunOnceResult(
     MissionStatus? FinalStatus,
     string? ErrorMessage,
     bool NoReadyWorkItems,
+    bool AllReadyItemsBlocked,
     bool QuotaDetected,
     DateTimeOffset? RetryAfter);

@@ -23,6 +23,8 @@ public sealed class ConfigLoaderTests
         Assert.Equal("claude", result.Config.Planner.Command);
         Assert.Equal("codex-cli", result.Config.Executor.Provider);
         Assert.Equal("codex", result.Config.Executor.Command);
+        Assert.Equal("agent-blocked", result.Config.WorkItems.BlockedLabel);
+        Assert.Equal("agent-failed", result.Config.WorkItems.FailedLabel);
         Assert.Equal(new[] { "dotnet test", "npm --prefix frontend run build" }, result.Config.Tests.Commands);
         Assert.Contains(".env.production", result.Config.Safety.ForbiddenPaths);
         Assert.Contains("too many requests", result.Config.Quota.QuotaPatterns);
@@ -69,6 +71,8 @@ public sealed class ConfigLoaderTests
           workingLabel: agent-working
           reviewLabel: agent-review
           pausedLabel: agent-paused
+          blockedLabel: agent-blocked
+          failedLabel: agent-failed
 
         planner:
           provider: claude-cli

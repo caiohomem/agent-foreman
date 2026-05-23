@@ -1,6 +1,7 @@
 using AgentForeman.Cli;
 using AgentForeman.Core.Coding;
 using AgentForeman.Core.Configuration;
+using AgentForeman.Core.Events;
 using AgentForeman.Core.Git;
 using AgentForeman.Core.State;
 
@@ -71,6 +72,7 @@ public sealed class CliExecuteTests
         Assert.NotEqual(0, result.ExitCode);
         Assert.Equal(MissionStatus.Failed, services.Missions.Saved.Last().Status);
         Assert.Contains("codex failed", services.Missions.Saved.Last().LastError);
+        Assert.Contains(services.Events.Events, e => e.EventType == MissionEventType.ExecutionFailed && e.Level == MissionEventLevel.Error);
     }
 
     [Fact]
@@ -125,6 +127,20 @@ public sealed class CliExecuteTests
         Assert.Contains("Work item not found", result.Error);
     }
 
+    [Fact]
+    public void ExecuteRecordsExecutionStartedAndCompletedEvents()
+    {
+        using var workspace = TemporaryDirectory.Create();
+        var services = ExecuteTestServices.Valid(workspace.Path);
+        SeedPlan(workspace.Path, "42");
+
+        var result = services.Execute(new[] { "execute", "42" });
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains(services.Events.Events, e => e.EventType == MissionEventType.ExecutionStarted);
+        Assert.Contains(services.Events.Events, e => e.EventType == MissionEventType.ExecutionCompleted);
+    }
+
     private static void SeedPlan(string repoPath, string externalId)
     {
         var planDir = Path.Combine(repoPath, ".agent", "runs", $"issue-{externalId}");
@@ -143,18 +159,21 @@ internal sealed class ExecuteTestServices
         FakeWorkItemProvider workItems,
         FakeCodingAgent codingAgent,
         FakeMissionRepository missions,
-        IMissionBranchPreparer branchPreparer)
+        IMissionBranchPreparer branchPreparer,
+        FakeMissionEventRecorder events)
     {
         _configLoader = configLoader;
         WorkItems = workItems;
         CodingAgent = codingAgent;
         Missions = missions;
         _branchPreparer = branchPreparer;
+        Events = events;
     }
 
     public FakeWorkItemProvider WorkItems { get; }
     public FakeCodingAgent CodingAgent { get; }
     public FakeMissionRepository Missions { get; }
+    public FakeMissionEventRecorder Events { get; }
 
     public static ExecuteTestServices Valid(
         string repoPath,
@@ -207,7 +226,8 @@ internal sealed class ExecuteTestServices
             new FakeWorkItemProvider(workItemExists),
             new FakeCodingAgent(codingResult ?? defaultResult),
             new FakeMissionRepository(),
-            branchPreparer ?? new FakeMissionBranchPreparer());
+            branchPreparer ?? new FakeMissionBranchPreparer(),
+            new FakeMissionEventRecorder());
     }
 
     public CommandResult Execute(IReadOnlyList<string> args)
@@ -223,7 +243,8 @@ internal sealed class ExecuteTestServices
             workItemProvider: WorkItems,
             missionRepository: Missions,
             codingAgent: CodingAgent,
-            branchPreparer: _branchPreparer);
+            branchPreparer: _branchPreparer,
+            missionEventRecorder: Events);
     }
 }
 

@@ -117,6 +117,32 @@ public sealed class CliStatusTests
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("Database error", result.Error);
     }
+
+    [Fact]
+    public void StatusDisplaysCompletedMissionStatus()
+    {
+        var missions = new FakeMissionRepository();
+        missions.Save(new Mission(
+            "github-42",
+            "42",
+            "GitHub",
+            "Fix elevator ad pacing",
+            MissionStatus.Completed,
+            Branch: "agent/issue-42",
+            PlanPath: null,
+            PullRequestUrl: "https://github.com/caio/elevator-ads-mvp/pull/10",
+            RetryAfter: null,
+            LastError: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            UpdatedAt: DateTimeOffset.UtcNow));
+
+        var services = StatusTestServices.Valid(missions: missions);
+
+        var result = services.Execute(new[] { "status" });
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Completed", result.Output);
+    }
 }
 
 internal sealed class StatusTestServices

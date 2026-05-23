@@ -7,6 +7,9 @@ public interface IWorkItemProvider
     Task MarkAsWorkingAsync(WorkItem item, CancellationToken cancellationToken);
     Task MarkAsPausedAsync(WorkItem item, string reason, DateTimeOffset retryAfter, CancellationToken cancellationToken);
     Task MarkAsReviewAsync(WorkItem item, string pullRequestUrl, CancellationToken cancellationToken);
+    Task MarkAsBlockedAsync(WorkItem item, IReadOnlyList<WorkItemDependency> dependencies, CancellationToken cancellationToken);
+    Task MarkAsFailedAsync(WorkItem item, string reason, CancellationToken cancellationToken);
+    Task MarkAsCompletedAsync(WorkItem item, CancellationToken cancellationToken);
     Task AddCommentAsync(WorkItem item, string comment, CancellationToken cancellationToken);
     Task<WorkItem> CreateWorkItemAsync(CreateWorkItemRequest request, CancellationToken cancellationToken);
 }

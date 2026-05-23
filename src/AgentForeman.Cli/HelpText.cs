@@ -16,6 +16,7 @@ public static class HelpText
           state     Manage local state database.
           exec      Run an external command through Agent Foreman.
           git       Inspect and manage the configured git repository.
+          labels    Manage Agent Foreman GitHub labels.
           work-items Inspect configured work items.
           plan      Create a technical plan for a work item.
           execute   Execute a planned work item with Codex.
@@ -24,6 +25,8 @@ public static class HelpText
           run-once  Run one ready work item.
           daemon    Watch for ready work items.
           status    Show mission status.
+          sync      Synchronize local mission state with GitHub issues.
+          events    Show structured mission events.
           resume    Resume a paused mission.
           cancel    Cancel a mission.
           doctor    Check local prerequisites.

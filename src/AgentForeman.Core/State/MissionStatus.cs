@@ -12,6 +12,7 @@ public enum MissionStatus
     TestsPassed,
     TestsFailed,
     PullRequestCreated,
+    Completed,
     PausedQuota,
     Failed,
     Cancelled,

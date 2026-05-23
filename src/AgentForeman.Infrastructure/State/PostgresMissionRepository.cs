@@ -18,7 +18,7 @@ public sealed class PostgresMissionRepository : IMissionRepository
         using var command = new NpgsqlCommand(
             """
             SELECT id, external_work_item_id, source, title, status, branch, plan_path, pull_request_url,
-                   retry_after, last_error, created_at, updated_at
+                   retry_after, last_error, created_at, updated_at, blocked_comment_posted_at
             FROM missions
             WHERE id = @id;
             """,
@@ -43,7 +43,8 @@ public sealed class PostgresMissionRepository : IMissionRepository
             reader.IsDBNull(8) ? null : reader.GetFieldValue<DateTimeOffset>(8),
             reader.IsDBNull(9) ? null : reader.GetString(9),
             reader.GetFieldValue<DateTimeOffset>(10),
-            reader.GetFieldValue<DateTimeOffset>(11));
+            reader.GetFieldValue<DateTimeOffset>(11),
+            reader.IsDBNull(12) ? null : reader.GetFieldValue<DateTimeOffset>(12));
     }
 
     public void Save(Mission mission)
@@ -53,11 +54,11 @@ public sealed class PostgresMissionRepository : IMissionRepository
             """
             INSERT INTO missions (
                 id, external_work_item_id, source, title, status, branch, plan_path, pull_request_url,
-                retry_after, last_error, created_at, updated_at
+                retry_after, last_error, created_at, updated_at, blocked_comment_posted_at
             )
             VALUES (
                 @id, @external_work_item_id, @source, @title, @status, @branch, @plan_path, @pull_request_url,
-                @retry_after, @last_error, @created_at, @updated_at
+                @retry_after, @last_error, @created_at, @updated_at, @blocked_comment_posted_at
             )
             ON CONFLICT (id) DO UPDATE SET
                 external_work_item_id = EXCLUDED.external_work_item_id,
@@ -69,7 +70,8 @@ public sealed class PostgresMissionRepository : IMissionRepository
                 pull_request_url = EXCLUDED.pull_request_url,
                 retry_after = EXCLUDED.retry_after,
                 last_error = EXCLUDED.last_error,
-                updated_at = EXCLUDED.updated_at;
+                updated_at = EXCLUDED.updated_at,
+                blocked_comment_posted_at = EXCLUDED.blocked_comment_posted_at;
             """,
             connection);
 
@@ -85,6 +87,7 @@ public sealed class PostgresMissionRepository : IMissionRepository
         command.Parameters.AddWithValue("last_error", (object?)mission.LastError ?? DBNull.Value);
         command.Parameters.AddWithValue("created_at", mission.CreatedAt);
         command.Parameters.AddWithValue("updated_at", mission.UpdatedAt);
+        command.Parameters.AddWithValue("blocked_comment_posted_at", (object?)mission.BlockedCommentPostedAt ?? DBNull.Value);
         command.ExecuteNonQuery();
     }
 
@@ -94,7 +97,7 @@ public sealed class PostgresMissionRepository : IMissionRepository
         using var command = new NpgsqlCommand(
             """
             SELECT id, external_work_item_id, source, title, status, branch, plan_path, pull_request_url,
-                   retry_after, last_error, created_at, updated_at
+                   retry_after, last_error, created_at, updated_at, blocked_comment_posted_at
             FROM missions
             ORDER BY updated_at DESC
             LIMIT @limit;
@@ -110,7 +113,7 @@ public sealed class PostgresMissionRepository : IMissionRepository
         using var command = new NpgsqlCommand(
             """
             SELECT id, external_work_item_id, source, title, status, branch, plan_path, pull_request_url,
-                   retry_after, last_error, created_at, updated_at
+                   retry_after, last_error, created_at, updated_at, blocked_comment_posted_at
             FROM missions
             WHERE status = @status
             ORDER BY updated_at DESC
@@ -140,7 +143,8 @@ public sealed class PostgresMissionRepository : IMissionRepository
                 reader.IsDBNull(8) ? null : reader.GetFieldValue<DateTimeOffset>(8),
                 reader.IsDBNull(9) ? null : reader.GetString(9),
                 reader.GetFieldValue<DateTimeOffset>(10),
-                reader.GetFieldValue<DateTimeOffset>(11)));
+                reader.GetFieldValue<DateTimeOffset>(11),
+                reader.IsDBNull(12) ? null : reader.GetFieldValue<DateTimeOffset>(12)));
         }
 
         return missions;

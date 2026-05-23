@@ -28,6 +28,8 @@ public sealed class WorkItemsConfig
     public string WorkingLabel { get; init; } = string.Empty;
     public string ReviewLabel { get; init; } = string.Empty;
     public string PausedLabel { get; init; } = string.Empty;
+    public string BlockedLabel { get; init; } = "agent-blocked";
+    public string FailedLabel { get; init; } = "agent-failed";
 }
 
 public sealed class PlannerConfig

@@ -1,5 +1,6 @@
 using AgentForeman.Cli;
 using AgentForeman.Core.Configuration;
+using AgentForeman.Core.Events;
 using AgentForeman.Core.Safety;
 using AgentForeman.Core.State;
 using AgentForeman.Core.Testing;
@@ -82,6 +83,19 @@ public sealed class CliVerifyTests
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("Work item not found", result.Error);
     }
+
+    [Fact]
+    public void VerifyRecordsVerificationStartedAndCompletedEvents()
+    {
+        using var workspace = TemporaryDirectory.Create();
+        var services = VerifyTestServices.Valid(workspace.Path);
+
+        var result = services.Execute(new[] { "verify", "42" });
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains(services.Events.Events, e => e.EventType == MissionEventType.VerificationStarted);
+        Assert.Contains(services.Events.Events, e => e.EventType == MissionEventType.VerificationCompleted);
+    }
 }
 
 internal sealed class VerifyTestServices
@@ -93,19 +107,22 @@ internal sealed class VerifyTestServices
         FakeWorkItemProvider workItems,
         FakeMissionRepository missions,
         FakeTestRunner testRunner,
-        FakeSafetyChecker safetyChecker)
+        FakeSafetyChecker safetyChecker,
+        FakeMissionEventRecorder events)
     {
         _configLoader = configLoader;
         WorkItems = workItems;
         Missions = missions;
         TestRunner = testRunner;
         SafetyChecker = safetyChecker;
+        Events = events;
     }
 
     public FakeWorkItemProvider WorkItems { get; }
     public FakeMissionRepository Missions { get; }
     public FakeTestRunner TestRunner { get; }
     public FakeSafetyChecker SafetyChecker { get; }
+    public FakeMissionEventRecorder Events { get; }
 
     public static VerifyTestServices Valid(
         string repoPath,
@@ -155,7 +172,8 @@ internal sealed class VerifyTestServices
             new FakeWorkItemProvider(workItemExists),
             new FakeMissionRepository(),
             new FakeTestRunner(testResult ?? defaultTestResult),
-            new FakeSafetyChecker(safetyResult ?? SafetyCheckResult.Ok()));
+            new FakeSafetyChecker(safetyResult ?? SafetyCheckResult.Ok()),
+            new FakeMissionEventRecorder());
     }
 
     public CommandResult Execute(IReadOnlyList<string> args)
@@ -171,7 +189,8 @@ internal sealed class VerifyTestServices
             workItemProvider: WorkItems,
             missionRepository: Missions,
             testRunner: TestRunner,
-            safetyChecker: SafetyChecker);
+            safetyChecker: SafetyChecker,
+            missionEventRecorder: Events);
     }
 }
 

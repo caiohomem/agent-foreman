@@ -1,6 +1,7 @@
 using AgentForeman.Cli;
 using AgentForeman.Core.Coding;
 using AgentForeman.Core.Configuration;
+using AgentForeman.Core.Events;
 using AgentForeman.Core.Git;
 using AgentForeman.Core.Planning;
 using AgentForeman.Core.Safety;
@@ -172,6 +173,177 @@ public sealed class CliRunOnceTests
         Assert.Equal(0, result.ExitCode);
         Assert.True(services.WorkItems.WorkingMarked);
     }
+
+    [Fact]
+    public void RunOnceSkipsBlockedReadyWorkItem()
+    {
+        var blocked = new WorkItem(
+            "41",
+            WorkItemSource.GitHub,
+            "Blocked work",
+            "Depends on: #1",
+            "https://github.com/caio/elevator-ads-mvp/issues/41",
+            "caio/elevator-ads-mvp",
+            new[] { new WorkItemLabel("agent-ready") },
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow,
+            Dependencies: new[] { new WorkItemDependency("1", "caio/elevator-ads-mvp") });
+        var ready = new WorkItem(
+            "42",
+            WorkItemSource.GitHub,
+            "Ready work",
+            "Issue body",
+            "https://github.com/caio/elevator-ads-mvp/issues/42",
+            "caio/elevator-ads-mvp",
+            new[] { new WorkItemLabel("agent-ready") },
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow);
+        var resolver = new FakeWorkItemDependencyResolver(new Dictionary<string, WorkItemDependencyStatus>
+        {
+            ["1"] = WorkItemDependencyStatus.Unsatisfied,
+        });
+        var services = RunOnceTestServices.Valid(readyItems: new[] { blocked, ready }, dependencyResolver: resolver);
+
+        var result = services.Execute(new[] { "run-once" });
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal("42", services.WorkItems.WorkingMarkedFor);
+        Assert.True(services.WorkItems.BlockedMarked);
+        Assert.Contains("dependencies are not completed", services.WorkItems.LastComment);
+    }
+
+    [Fact]
+    public void RunOnceReturnsZeroWhenAllReadyItemsAreBlocked()
+    {
+        var blocked = new WorkItem(
+            "41",
+            WorkItemSource.GitHub,
+            "Blocked work",
+            "Depends on: #1",
+            "https://github.com/caio/elevator-ads-mvp/issues/41",
+            "caio/elevator-ads-mvp",
+            new[] { new WorkItemLabel("agent-ready") },
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow,
+            Dependencies: new[] { new WorkItemDependency("1", "caio/elevator-ads-mvp") });
+        var resolver = new FakeWorkItemDependencyResolver(new Dictionary<string, WorkItemDependencyStatus>
+        {
+            ["1"] = WorkItemDependencyStatus.Unsatisfied,
+        });
+        var services = RunOnceTestServices.Valid(readyItems: new[] { blocked }, dependencyResolver: resolver);
+
+        var result = services.Execute(new[] { "run-once" });
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("all are blocked by dependencies", result.Output);
+        Assert.False(services.WorkItems.WorkingMarked);
+    }
+
+    [Fact]
+    public void BlockedCommentsAreNotRepeated()
+    {
+        var blocked = new WorkItem(
+            "41",
+            WorkItemSource.GitHub,
+            "Blocked work",
+            "Depends on: #1",
+            "https://github.com/caio/elevator-ads-mvp/issues/41",
+            "caio/elevator-ads-mvp",
+            new[] { new WorkItemLabel("agent-ready") },
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow,
+            Dependencies: new[] { new WorkItemDependency("1", "caio/elevator-ads-mvp") });
+        var resolver = new FakeWorkItemDependencyResolver(new Dictionary<string, WorkItemDependencyStatus>
+        {
+            ["1"] = WorkItemDependencyStatus.Unsatisfied,
+        });
+        var missionId = "github-41";
+        var missions = new FakeMissionRepository();
+        missions.Save(new Mission(
+            missionId,
+            "41",
+            "GitHub",
+            "Blocked work",
+            MissionStatus.New,
+            null,
+            null,
+            null,
+            null,
+            null,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow,
+            BlockedCommentPostedAt: DateTimeOffset.UtcNow));
+        var services = RunOnceTestServices.Valid(readyItems: new[] { blocked }, dependencyResolver: resolver, missions: missions);
+
+        var result = services.Execute(new[] { "run-once" });
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(0, services.WorkItems.BlockedMarkCount);
+    }
+
+    [Fact]
+    public void RunOnceRemovesBlockedLabelWhenDependencyIsSatisfiedAndWorkStarts()
+    {
+        var blocked = new WorkItem(
+            "41",
+            WorkItemSource.GitHub,
+            "Blocked work",
+            "Depends on: #1",
+            "https://github.com/caio/elevator-ads-mvp/issues/41",
+            "caio/elevator-ads-mvp",
+            new[] { new WorkItemLabel("agent-ready"), new WorkItemLabel("agent-blocked") },
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow,
+            Dependencies: new[] { new WorkItemDependency("1", "caio/elevator-ads-mvp") });
+        var resolver = new FakeWorkItemDependencyResolver(new Dictionary<string, WorkItemDependencyStatus>
+        {
+            ["1"] = WorkItemDependencyStatus.Satisfied,
+        });
+        var services = RunOnceTestServices.Valid(readyItems: new[] { blocked }, dependencyResolver: resolver);
+
+        var result = services.Execute(new[] { "run-once" });
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal("41", services.WorkItems.WorkingMarkedFor);
+    }
+
+    [Fact]
+    public void RunOnceRecordsMissionStartedAndMissionCompletedEvents()
+    {
+        var services = RunOnceTestServices.Valid();
+
+        var result = services.Execute(new[] { "run-once" });
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains(services.Events.Events, e => e.EventType == MissionEventType.MissionStarted);
+        Assert.Contains(services.Events.Events, e => e.EventType == MissionEventType.MissionCompleted);
+    }
+
+    [Fact]
+    public void RunOnceRecordsDependencyBlockedEvent()
+    {
+        var blocked = new WorkItem(
+            "41",
+            WorkItemSource.GitHub,
+            "Blocked work",
+            "Depends on: #1",
+            "https://github.com/caio/elevator-ads-mvp/issues/41",
+            "caio/elevator-ads-mvp",
+            new[] { new WorkItemLabel("agent-ready") },
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow,
+            Dependencies: new[] { new WorkItemDependency("1", "caio/elevator-ads-mvp") });
+        var resolver = new FakeWorkItemDependencyResolver(new Dictionary<string, WorkItemDependencyStatus>
+        {
+            ["1"] = WorkItemDependencyStatus.Unsatisfied,
+        });
+        var services = RunOnceTestServices.Valid(readyItems: new[] { blocked }, dependencyResolver: resolver);
+
+        var result = services.Execute(new[] { "run-once" });
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains(services.Events.Events, e => e.EventType == MissionEventType.DependencyBlocked);
+    }
 }
 
 internal sealed class RunOnceTestServices
@@ -182,6 +354,7 @@ internal sealed class RunOnceTestServices
     private readonly FakeTestRunner _testRunner;
     private readonly FakeSafetyChecker _safetyChecker;
     private readonly IMissionBranchPreparer _branchPreparer;
+    private readonly IWorkItemDependencyResolver _dependencyResolver;
 
     private RunOnceTestServices(
         FakeConfigLoader configLoader,
@@ -193,7 +366,9 @@ internal sealed class RunOnceTestServices
         RecordingGitRepository gitRepo,
         FakePullRequestProvider pullRequests,
         FakeMissionRepository missions,
-        IMissionBranchPreparer branchPreparer)
+        IMissionBranchPreparer branchPreparer,
+        IWorkItemDependencyResolver dependencyResolver,
+        FakeMissionEventRecorder events)
     {
         _configLoader = configLoader;
         WorkItems = workItems;
@@ -205,12 +380,15 @@ internal sealed class RunOnceTestServices
         PullRequests = pullRequests;
         Missions = missions;
         _branchPreparer = branchPreparer;
+        _dependencyResolver = dependencyResolver;
+        Events = events;
     }
 
     public FakeWorkItemProvider WorkItems { get; }
     public RecordingGitRepository GitRepo { get; }
     public FakePullRequestProvider PullRequests { get; }
     public FakeMissionRepository Missions { get; }
+    public FakeMissionEventRecorder Events { get; }
 
     public static RunOnceTestServices Valid(
         RecordingGitRepository? gitRepo = null,
@@ -221,7 +399,10 @@ internal sealed class RunOnceTestServices
         bool prSucceeds = true,
         bool hasReadyItems = true,
         string repoPath = "/workspace/project",
-        IMissionBranchPreparer? branchPreparer = null)
+        IMissionBranchPreparer? branchPreparer = null,
+        IReadOnlyList<WorkItem>? readyItems = null,
+        IWorkItemDependencyResolver? dependencyResolver = null,
+        FakeMissionRepository? missions = null)
     {
         var config = new AgentForemanConfig
         {
@@ -272,7 +453,7 @@ internal sealed class RunOnceTestServices
             },
         };
 
-        IReadOnlyList<WorkItem> readyItems = hasReadyItems
+        readyItems ??= hasReadyItems
             ? new[]
             {
                 new WorkItem(
@@ -322,8 +503,10 @@ internal sealed class RunOnceTestServices
             new FakeSafetyChecker(safetyResult ?? SafetyCheckResult.Ok()),
             gitRepo ?? new RecordingGitRepository(currentBranch: "main"),
             new FakePullRequestProvider(prSucceeds),
-            new FakeMissionRepository(),
-            branchPreparer ?? new FakeMissionBranchPreparer());
+            missions ?? new FakeMissionRepository(),
+            branchPreparer ?? new FakeMissionBranchPreparer(),
+            dependencyResolver ?? new FakeWorkItemDependencyResolver(new Dictionary<string, WorkItemDependencyStatus>()),
+            new FakeMissionEventRecorder());
     }
 
     public CommandResult Execute(IReadOnlyList<string> args)
@@ -344,6 +527,8 @@ internal sealed class RunOnceTestServices
             safetyChecker: _safetyChecker,
             gitRepository: GitRepo,
             pullRequestProvider: PullRequests,
-            branchPreparer: _branchPreparer);
+            branchPreparer: _branchPreparer,
+            dependencyResolver: _dependencyResolver,
+            missionEventRecorder: Events);
     }
 }

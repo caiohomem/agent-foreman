@@ -1,0 +1,29 @@
+namespace AgentForeman.Core.Events;
+
+public enum MissionEventType
+{
+    MissionStarted,
+    MissionCompleted,
+    MissionFailed,
+    MissionPausedQuota,
+    MissionResumed,
+    MissionCancelled,
+    PlanningStarted,
+    PlanningCompleted,
+    PlanningFailed,
+    ExecutionStarted,
+    ExecutionCompleted,
+    ExecutionFailed,
+    VerificationStarted,
+    VerificationCompleted,
+    VerificationFailed,
+    SubmitStarted,
+    PullRequestCreated,
+    SubmitFailed,
+    DependencyBlocked,
+    LabelUpdated,
+    BranchPrepared,
+    CommandStarted,
+    CommandCompleted,
+    CommandFailed,
+}

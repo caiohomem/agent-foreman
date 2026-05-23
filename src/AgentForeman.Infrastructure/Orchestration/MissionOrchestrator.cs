@@ -1,5 +1,6 @@
 using AgentForeman.Core.Coding;
 using AgentForeman.Core.Configuration;
+using AgentForeman.Core.Events;
 using AgentForeman.Core.Git;
 using AgentForeman.Core.Orchestration;
 using AgentForeman.Core.Planning;
@@ -22,6 +23,8 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
     private readonly IGitRepository _gitRepository;
     private readonly IMissionRepository _missionRepository;
     private readonly IMissionBranchPreparer _branchPreparer;
+    private readonly IWorkItemDependencyResolver _dependencyResolver;
+    private readonly IMissionEventRecorder _missionEventRecorder;
 
     public MissionOrchestrator(
         IWorkItemProvider workItemProvider,
@@ -32,7 +35,9 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
         IPullRequestProvider pullRequestProvider,
         IGitRepository gitRepository,
         IMissionRepository missionRepository,
-        IMissionBranchPreparer branchPreparer)
+        IMissionBranchPreparer branchPreparer,
+        IWorkItemDependencyResolver dependencyResolver,
+        IMissionEventRecorder missionEventRecorder)
     {
         _workItemProvider = workItemProvider;
         _planningAgent = planningAgent;
@@ -43,6 +48,8 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
         _gitRepository = gitRepository;
         _missionRepository = missionRepository;
         _branchPreparer = branchPreparer;
+        _dependencyResolver = dependencyResolver;
+        _missionEventRecorder = missionEventRecorder;
     }
 
     public async Task<RunOnceResult> RunOnceAsync(RunOnceRequest request, Action<string>? onProgress, CancellationToken cancellationToken)
@@ -61,11 +68,94 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
                 FinalStatus: null,
                 ErrorMessage: null,
                 NoReadyWorkItems: true,
+                AllReadyItemsBlocked: false,
                 QuotaDetected: false,
                 RetryAfter: null);
         }
 
-        var item = readyItems[0];
+        WorkItem? item = null;
+        foreach (var candidate in readyItems)
+        {
+            var dependencies = candidate.Dependencies ?? Array.Empty<WorkItemDependency>();
+            if (dependencies.Count == 0)
+            {
+                item = candidate;
+                break;
+            }
+
+            var resolvedDependencies = new List<WorkItemDependency>(dependencies.Count);
+            foreach (var dependency in dependencies)
+            {
+                resolvedDependencies.Add(await _dependencyResolver.ResolveAsync(dependency, cancellationToken));
+            }
+
+            if (resolvedDependencies.All(d => d.Status == WorkItemDependencyStatus.Satisfied))
+            {
+                item = candidate with { Dependencies = resolvedDependencies };
+                break;
+            }
+
+            var blockedMissionId = $"{candidate.Source.ToString().ToLowerInvariant()}-{candidate.ExternalId}";
+            var blockedAt = DateTimeOffset.UtcNow;
+            var existingBlockedMission = _missionRepository.GetById(blockedMissionId);
+            var blockedMission = (existingBlockedMission ?? new Mission(
+                    blockedMissionId,
+                    candidate.ExternalId,
+                    candidate.Source.ToString(),
+                    candidate.Title,
+                    MissionStatus.New,
+                    Branch: null,
+                    PlanPath: null,
+                    PullRequestUrl: null,
+                    RetryAfter: null,
+                    LastError: null,
+                    CreatedAt: blockedAt,
+                    UpdatedAt: blockedAt))
+                with
+                {
+                    Title = candidate.Title,
+                    UpdatedAt = blockedAt,
+                };
+
+            if (blockedMission.BlockedCommentPostedAt is null)
+            {
+                try
+                {
+                    await RecordEventAsync(
+                        blockedMissionId,
+                        candidate.ExternalId,
+                        MissionEventType.DependencyBlocked,
+                        MissionEventLevel.Warning,
+                        $"Dependencies are not completed: {string.Join(", ", resolvedDependencies.Where(d => d.Status != WorkItemDependencyStatus.Satisfied).Select(d => $"#{d.Reference}"))}.",
+                        cancellationToken);
+                    await _workItemProvider.MarkAsBlockedAsync(
+                        candidate,
+                        resolvedDependencies.Where(d => d.Status != WorkItemDependencyStatus.Satisfied).ToArray(),
+                        cancellationToken);
+                    blockedMission = blockedMission with { BlockedCommentPostedAt = blockedAt };
+                    _missionRepository.Save(blockedMission);
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        if (item is null)
+        {
+            return new RunOnceResult(
+                Success: true,
+                PullRequestUrl: null,
+                WorkItemId: null,
+                WorkItemTitle: null,
+                FinalStatus: null,
+                ErrorMessage: null,
+                NoReadyWorkItems: false,
+                AllReadyItemsBlocked: true,
+                QuotaDetected: false,
+                RetryAfter: null);
+        }
+
         try { await _workItemProvider.MarkAsWorkingAsync(item, cancellationToken); } catch { }
 
         var missionId = $"{item.Source.ToString().ToLowerInvariant()}-{item.ExternalId}";
@@ -95,6 +185,8 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
                 UpdatedAt = now,
             };
         _missionRepository.Save(mission);
+        await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionStarted, MissionEventLevel.Info, $"Running work item #{item.ExternalId}.", cancellationToken);
+        await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.PlanningStarted, MissionEventLevel.Info, "Creating technical plan.", cancellationToken);
 
         onProgress?.Invoke("[1/4] Planning...");
         var planRequest = new PlanningRequest(
@@ -117,6 +209,8 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
         {
             mission = mission with { Status = MissionStatus.Failed, LastError = ex.Message, UpdatedAt = DateTimeOffset.UtcNow };
             _missionRepository.Save(mission);
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.PlanningFailed, MissionEventLevel.Error, $"Planning failed: {ex.Message}", cancellationToken);
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionFailed, MissionEventLevel.Error, ex.Message, cancellationToken);
             return FailureResult(item, MissionStatus.Failed, ex.Message);
         }
 
@@ -135,8 +229,9 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
                     UpdatedAt = DateTimeOffset.UtcNow,
                 };
                 _missionRepository.Save(mission);
+                await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionPausedQuota, MissionEventLevel.Warning, reason, cancellationToken);
                 await TryMarkAsPausedAsync(item, reason, retryAfter, cancellationToken);
-                return new RunOnceResult(false, null, item.ExternalId, item.Title, MissionStatus.PausedQuota, planResult.ErrorMessage, false, true, retryAfter);
+                return new RunOnceResult(false, null, item.ExternalId, item.Title, MissionStatus.PausedQuota, planResult.ErrorMessage, false, false, true, retryAfter);
             }
 
             mission = mission with
@@ -147,6 +242,8 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
                 UpdatedAt = DateTimeOffset.UtcNow,
             };
             _missionRepository.Save(mission);
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.PlanningFailed, MissionEventLevel.Error, planResult.ErrorMessage ?? "Planning failed.", cancellationToken);
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionFailed, MissionEventLevel.Error, planResult.ErrorMessage ?? "Planning failed.", cancellationToken);
             return FailureResult(item, MissionStatus.Failed, planResult.ErrorMessage ?? "Planning failed.");
         }
 
@@ -158,6 +255,7 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
             UpdatedAt = DateTimeOffset.UtcNow,
         };
         _missionRepository.Save(mission);
+        await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.PlanningCompleted, MissionEventLevel.Info, "Plan created.", cancellationToken);
 
         var agentBranch = $"agent/issue-{item.ExternalId}";
         var branchPrepResult = await _branchPreparer.PrepareAsync(
@@ -167,12 +265,16 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
         {
             mission = mission with { Status = MissionStatus.Failed, LastError = branchPrepResult.ErrorMessage, UpdatedAt = DateTimeOffset.UtcNow };
             _missionRepository.Save(mission);
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.ExecutionFailed, MissionEventLevel.Error, branchPrepResult.ErrorMessage ?? "Branch preparation failed.", cancellationToken);
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionFailed, MissionEventLevel.Error, branchPrepResult.ErrorMessage ?? "Branch preparation failed.", cancellationToken);
             return FailureResult(item, MissionStatus.Failed, branchPrepResult.ErrorMessage ?? "Branch preparation failed.");
         }
+        await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.BranchPrepared, MissionEventLevel.Info, $"Prepared branch {agentBranch}.", cancellationToken);
 
         onProgress?.Invoke("[2/4] Executing...");
         mission = mission with { Status = MissionStatus.Coding, LastError = null, UpdatedAt = DateTimeOffset.UtcNow };
         _missionRepository.Save(mission);
+        await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.ExecutionStarted, MissionEventLevel.Info, "Running Codex.", cancellationToken);
 
         var codingRequest = new CodingRequest(
             item.ExternalId,
@@ -198,6 +300,8 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
         {
             mission = mission with { Status = MissionStatus.Failed, LastError = ex.Message, UpdatedAt = DateTimeOffset.UtcNow };
             _missionRepository.Save(mission);
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.ExecutionFailed, MissionEventLevel.Error, $"Execution failed: {ex.Message}", cancellationToken);
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionFailed, MissionEventLevel.Error, ex.Message, cancellationToken);
             return FailureResult(item, MissionStatus.Failed, ex.Message);
         }
 
@@ -214,17 +318,21 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
                     UpdatedAt = DateTimeOffset.UtcNow,
                 };
                 _missionRepository.Save(mission);
+                await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionPausedQuota, MissionEventLevel.Warning, "Codex quota or rate limit detected.", cancellationToken);
                 try { await _workItemProvider.AddCommentAsync(item, $"Codex quota or rate limit detected. Retry after: {retryAfter:O}", cancellationToken); } catch { }
-                return new RunOnceResult(false, null, item.ExternalId, item.Title, MissionStatus.PausedQuota, codingResult.ErrorMessage, false, true, retryAfter);
+                return new RunOnceResult(false, null, item.ExternalId, item.Title, MissionStatus.PausedQuota, codingResult.ErrorMessage, false, false, true, retryAfter);
             }
 
             mission = mission with { Status = MissionStatus.Failed, LastError = codingResult.ErrorMessage, UpdatedAt = DateTimeOffset.UtcNow };
             _missionRepository.Save(mission);
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.ExecutionFailed, MissionEventLevel.Error, codingResult.ErrorMessage ?? "Execution failed.", cancellationToken);
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionFailed, MissionEventLevel.Error, codingResult.ErrorMessage ?? "Execution failed.", cancellationToken);
             return FailureResult(item, MissionStatus.Failed, codingResult.ErrorMessage ?? "Execution failed.");
         }
 
         mission = mission with { Status = MissionStatus.CodingCompleted, LastError = null, UpdatedAt = DateTimeOffset.UtcNow };
         _missionRepository.Save(mission);
+        await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.ExecutionCompleted, MissionEventLevel.Info, "Execution completed.", cancellationToken);
 
         onProgress?.Invoke("[3/4] Verifying...");
         var safetyResult = await _safetyChecker.CheckAsync(repoPath, config.Safety, cancellationToken);
@@ -234,6 +342,8 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
             var errorMessage = $"Safety check failed: {violationMessages}";
             mission = mission with { Status = MissionStatus.Failed, LastError = errorMessage, UpdatedAt = DateTimeOffset.UtcNow };
             _missionRepository.Save(mission);
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.VerificationFailed, MissionEventLevel.Error, errorMessage, cancellationToken);
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionFailed, MissionEventLevel.Error, errorMessage, cancellationToken);
             return FailureResult(item, MissionStatus.Failed, errorMessage);
         }
 
@@ -241,12 +351,15 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
         TestRunResult testResult;
         try
         {
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.VerificationStarted, MissionEventLevel.Info, "Running safety checks and tests.", cancellationToken);
             testResult = await _testRunner.RunAsync(testRequest, cancellationToken);
         }
         catch (Exception ex)
         {
             mission = mission with { Status = MissionStatus.TestsFailed, LastError = ex.Message, UpdatedAt = DateTimeOffset.UtcNow };
             _missionRepository.Save(mission);
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.VerificationFailed, MissionEventLevel.Error, $"Tests failed: {ex.Message}", cancellationToken);
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionFailed, MissionEventLevel.Error, ex.Message, cancellationToken);
             return FailureResult(item, MissionStatus.TestsFailed, ex.Message);
         }
 
@@ -254,11 +367,14 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
         {
             mission = mission with { Status = MissionStatus.TestsFailed, LastError = testResult.ErrorMessage, UpdatedAt = DateTimeOffset.UtcNow };
             _missionRepository.Save(mission);
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.VerificationFailed, MissionEventLevel.Error, testResult.ErrorMessage ?? "Tests failed.", cancellationToken);
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionFailed, MissionEventLevel.Error, testResult.ErrorMessage ?? "Tests failed.", cancellationToken);
             return FailureResult(item, MissionStatus.TestsFailed, testResult.ErrorMessage ?? "Tests failed.");
         }
 
         mission = mission with { Status = MissionStatus.TestsPassed, LastError = null, UpdatedAt = DateTimeOffset.UtcNow };
         _missionRepository.Save(mission);
+        await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.VerificationCompleted, MissionEventLevel.Info, "Verification passed.", cancellationToken);
 
         onProgress?.Invoke("[4/4] Submitting...");
         mission = mission with { Branch = agentBranch, UpdatedAt = DateTimeOffset.UtcNow };
@@ -277,12 +393,15 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
 
         try
         {
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.SubmitStarted, MissionEventLevel.Info, "Creating pull request.", cancellationToken);
             await _gitRepository.PushAsync(repoPath, "origin", agentBranch, cancellationToken);
         }
         catch (Exception ex)
         {
             mission = mission with { Status = MissionStatus.Failed, LastError = ex.Message, UpdatedAt = DateTimeOffset.UtcNow };
             _missionRepository.Save(mission);
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.SubmitFailed, MissionEventLevel.Error, $"Push failed: {ex.Message}", cancellationToken);
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionFailed, MissionEventLevel.Error, $"Push failed: {ex.Message}", cancellationToken);
             return FailureResult(item, MissionStatus.Failed, $"Push failed: {ex.Message}");
         }
 
@@ -307,6 +426,8 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
         {
             mission = mission with { Status = MissionStatus.Failed, LastError = ex.Message, UpdatedAt = DateTimeOffset.UtcNow };
             _missionRepository.Save(mission);
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.SubmitFailed, MissionEventLevel.Error, $"PR creation failed: {ex.Message}", cancellationToken);
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionFailed, MissionEventLevel.Error, $"PR creation failed: {ex.Message}", cancellationToken);
             return FailureResult(item, MissionStatus.Failed, $"PR creation failed: {ex.Message}");
         }
 
@@ -314,6 +435,8 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
         {
             mission = mission with { Status = MissionStatus.Failed, LastError = prResult.ErrorMessage, UpdatedAt = DateTimeOffset.UtcNow };
             _missionRepository.Save(mission);
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.SubmitFailed, MissionEventLevel.Error, $"PR creation failed: {prResult.ErrorMessage}", cancellationToken);
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionFailed, MissionEventLevel.Error, $"PR creation failed: {prResult.ErrorMessage}", cancellationToken);
             return FailureResult(item, MissionStatus.Failed, $"PR creation failed: {prResult.ErrorMessage}");
         }
 
@@ -325,6 +448,8 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
             UpdatedAt = DateTimeOffset.UtcNow,
         };
         _missionRepository.Save(mission);
+        await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.PullRequestCreated, MissionEventLevel.Info, "Pull request created.", cancellationToken);
+        await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionCompleted, MissionEventLevel.Info, $"Mission completed for work item #{item.ExternalId}.", cancellationToken);
 
         await TryMarkAsReviewAsync(item, prResult.PullRequestUrl!, cancellationToken);
 
@@ -336,6 +461,7 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
             FinalStatus: MissionStatus.PullRequestCreated,
             ErrorMessage: null,
             NoReadyWorkItems: false,
+            AllReadyItemsBlocked: false,
             QuotaDetected: false,
             RetryAfter: null);
     }
@@ -357,6 +483,7 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
         var idx = 1;
 
         onProgress?.Invoke($"Resuming mission {mission.Id}");
+        await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionResumed, MissionEventLevel.Info, $"Resuming mission {mission.Id}.", cancellationToken);
 
         string? planContent = null;
         var currentPlanPath = mission.PlanPath ?? planFilePath;
@@ -656,7 +783,7 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
 
     private static RunOnceResult FailureResult(WorkItem item, MissionStatus status, string errorMessage)
     {
-        return new RunOnceResult(false, null, item.ExternalId, item.Title, status, errorMessage, false, false, null);
+        return new RunOnceResult(false, null, item.ExternalId, item.Title, status, errorMessage, false, false, false, null);
     }
 
     private static bool IsQuotaFailure(string stdout, string stderr, string? errorMessage, AgentForemanConfig config)
@@ -701,6 +828,9 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
             lines.Add(string.Empty);
         }
 
+        lines.Add($"Closes #{item.ExternalId}");
+        lines.Add(string.Empty);
+        lines.Add($"This PR closes #{item.ExternalId} when merged.");
         lines.Add("This pull request was generated by **Agent Foreman** and requires human review before merging.");
         lines.Add(string.Empty);
         lines.Add("### Artifacts");
@@ -713,5 +843,34 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
         }
 
         return string.Join(Environment.NewLine, lines);
+    }
+
+    private async Task RecordEventAsync(
+        string missionId,
+        string? externalWorkItemId,
+        MissionEventType eventType,
+        MissionEventLevel level,
+        string message,
+        CancellationToken cancellationToken,
+        string? metadataJson = null)
+    {
+        try
+        {
+            await _missionEventRecorder.AppendMissionEventAsync(
+                new MissionEvent(
+                    Guid.NewGuid().ToString("N"),
+                    missionId,
+                    externalWorkItemId,
+                    RunId: null,
+                    eventType,
+                    level,
+                    message,
+                    metadataJson,
+                    DateTimeOffset.UtcNow),
+                cancellationToken);
+        }
+        catch
+        {
+        }
     }
 }

@@ -1,5 +1,6 @@
 using AgentForeman.Cli;
 using AgentForeman.Core.Configuration;
+using AgentForeman.Core.Events;
 using AgentForeman.Core.Planning;
 using AgentForeman.Core.State;
 using AgentForeman.Core.WorkItems;
@@ -82,6 +83,18 @@ public sealed class CliPlanTests
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("Work item not found", result.Error);
     }
+
+    [Fact]
+    public void PlanRecordsPlanningStartedAndCompletedEvents()
+    {
+        var services = PlanTestServices.Valid();
+
+        var result = services.Execute(new[] { "plan", "42" });
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains(services.Events.Events, e => e.EventType == MissionEventType.PlanningStarted);
+        Assert.Contains(services.Events.Events, e => e.EventType == MissionEventType.PlanningCompleted);
+    }
 }
 
 internal sealed class PlanTestServices
@@ -93,16 +106,19 @@ internal sealed class PlanTestServices
         FakeConfigLoader configLoader,
         FakeWorkItemProvider workItems,
         FakePlanningAgent planningAgent,
-        FakeMissionRepository missions)
+        FakeMissionRepository missions,
+        FakeMissionEventRecorder events)
     {
         _configLoader = configLoader;
         WorkItems = workItems;
         _planningAgent = planningAgent;
         Missions = missions;
+        Events = events;
     }
 
     public FakeWorkItemProvider WorkItems { get; }
     public FakeMissionRepository Missions { get; }
+    public FakeMissionEventRecorder Events { get; }
 
     public static PlanTestServices Valid(PlanningResult? planningResult = null, bool workItemExists = true)
     {
@@ -148,7 +164,8 @@ internal sealed class PlanTestServices
                 0,
                 DateTimeOffset.UtcNow,
                 DateTimeOffset.UtcNow)),
-            new FakeMissionRepository());
+            new FakeMissionRepository(),
+            new FakeMissionEventRecorder());
     }
 
     public CommandResult Execute(IReadOnlyList<string> args)
@@ -163,7 +180,8 @@ internal sealed class PlanTestServices
             new RecordingCommandRunner(),
             workItemProvider: WorkItems,
             planningAgent: _planningAgent,
-            missionRepository: Missions);
+            missionRepository: Missions,
+            missionEventRecorder: Events);
     }
 }
 
@@ -171,11 +189,13 @@ internal sealed class FakeWorkItemProvider : IWorkItemProvider
 {
     private readonly bool _exists;
     private readonly IReadOnlyList<WorkItem> _readyItems;
+    private readonly WorkItemState _itemState;
 
-    public FakeWorkItemProvider(bool exists, IReadOnlyList<WorkItem>? readyItems = null)
+    public FakeWorkItemProvider(bool exists, IReadOnlyList<WorkItem>? readyItems = null, WorkItemState itemState = WorkItemState.Open)
     {
         _exists = exists;
         _readyItems = readyItems ?? Array.Empty<WorkItem>();
+        _itemState = itemState;
     }
 
     public string? RequestedId { get; private set; }
@@ -183,6 +203,11 @@ internal sealed class FakeWorkItemProvider : IWorkItemProvider
     public string? LastComment { get; private set; }
     public bool MarkedAsReview { get; private set; }
     public bool WorkingMarked { get; private set; }
+    public string? WorkingMarkedFor { get; private set; }
+    public bool BlockedMarked { get; private set; }
+    public int BlockedMarkCount { get; private set; }
+    public bool FailedMarked { get; private set; }
+    public bool CompletedMarked { get; private set; }
     public bool CreateInvoked { get; private set; }
 
     public Task<IReadOnlyList<WorkItem>> GetReadyItemsAsync(CancellationToken cancellationToken)
@@ -207,12 +232,15 @@ internal sealed class FakeWorkItemProvider : IWorkItemProvider
             "caio/elevator-ads-mvp",
             new[] { new WorkItemLabel("agent-ready") },
             DateTimeOffset.UtcNow,
-            DateTimeOffset.UtcNow));
+            DateTimeOffset.UtcNow,
+            State: _itemState,
+            ClosedAt: _itemState == WorkItemState.Closed ? DateTimeOffset.UtcNow : null));
     }
 
     public Task MarkAsWorkingAsync(WorkItem item, CancellationToken cancellationToken)
     {
         WorkingMarked = true;
+        WorkingMarkedFor = item.ExternalId;
         return Task.CompletedTask;
     }
 
@@ -228,6 +256,27 @@ internal sealed class FakeWorkItemProvider : IWorkItemProvider
         return Task.CompletedTask;
     }
 
+    public Task MarkAsBlockedAsync(WorkItem item, IReadOnlyList<WorkItemDependency> dependencies, CancellationToken cancellationToken)
+    {
+        BlockedMarked = true;
+        BlockedMarkCount++;
+        LastComment = $"Agent Foreman skipped this issue because dependencies are not completed: {string.Join(", ", dependencies.Select(d => $"#{d.Reference}"))}";
+        return Task.CompletedTask;
+    }
+
+    public Task MarkAsFailedAsync(WorkItem item, string reason, CancellationToken cancellationToken)
+    {
+        FailedMarked = true;
+        LastComment = $"Failed: {reason}";
+        return Task.CompletedTask;
+    }
+
+    public Task MarkAsCompletedAsync(WorkItem item, CancellationToken cancellationToken)
+    {
+        CompletedMarked = true;
+        return Task.CompletedTask;
+    }
+
     public Task AddCommentAsync(WorkItem item, string comment, CancellationToken cancellationToken)
     {
         LastComment = comment;
@@ -238,6 +287,24 @@ internal sealed class FakeWorkItemProvider : IWorkItemProvider
     {
         CreateInvoked = true;
         throw new NotImplementedException();
+    }
+}
+
+internal sealed class FakeWorkItemDependencyResolver : IWorkItemDependencyResolver
+{
+    private readonly IReadOnlyDictionary<string, WorkItemDependencyStatus> _statuses;
+
+    public FakeWorkItemDependencyResolver(IReadOnlyDictionary<string, WorkItemDependencyStatus> statuses)
+    {
+        _statuses = statuses;
+    }
+
+    public Task<WorkItemDependency> ResolveAsync(WorkItemDependency dependency, CancellationToken cancellationToken)
+    {
+        var status = _statuses.TryGetValue(dependency.Reference, out var value)
+            ? value
+            : WorkItemDependencyStatus.Satisfied;
+        return Task.FromResult(dependency with { Status = status });
     }
 }
 
@@ -293,6 +360,40 @@ internal sealed class FakeMissionRepository : IMissionRepository
             .OrderByDescending(m => m.UpdatedAt)
             .Take(limit)
             .ToList();
+    }
+}
+
+internal sealed class FakeMissionEventRecorder : IMissionEventRecorder
+{
+    public List<MissionEvent> Events { get; } = new();
+    public string? LastMissionId { get; private set; }
+    public int? LastLimit { get; private set; }
+
+    public Task AppendMissionEventAsync(MissionEvent missionEvent, CancellationToken cancellationToken)
+    {
+        Events.Add(missionEvent);
+        return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyList<MissionEvent>> GetMissionEventsAsync(string missionId, int limit, CancellationToken cancellationToken)
+    {
+        LastMissionId = missionId;
+        LastLimit = limit;
+        return Task.FromResult<IReadOnlyList<MissionEvent>>(Events
+            .Where(e => e.MissionId == missionId)
+            .OrderBy(e => e.CreatedAt)
+            .Take(limit)
+            .ToList());
+    }
+
+    public Task<IReadOnlyList<MissionEvent>> GetRecentMissionEventsAsync(int limit, CancellationToken cancellationToken)
+    {
+        LastLimit = limit;
+        return Task.FromResult<IReadOnlyList<MissionEvent>>(Events
+            .OrderByDescending(e => e.CreatedAt)
+            .Take(limit)
+            .OrderBy(e => e.CreatedAt)
+            .ToList());
     }
 }
 

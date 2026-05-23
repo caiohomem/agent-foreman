@@ -1,5 +1,6 @@
 using AgentForeman.Cli;
 using AgentForeman.Core.Configuration;
+using AgentForeman.Core.Events;
 using AgentForeman.Core.Git;
 using AgentForeman.Core.PullRequests;
 using AgentForeman.Core.State;
@@ -93,10 +94,24 @@ public sealed class CliSubmitTests
         Assert.NotNull(services.PullRequests.LastRequest);
         Assert.Equal("Implement issue #42: Fix elevator ad pacing", services.PullRequests.LastRequest!.PullRequestTitle);
         Assert.Contains("Issue #42", services.PullRequests.LastRequest.PullRequestBody);
+        Assert.Contains("Closes #42", services.PullRequests.LastRequest.PullRequestBody);
+        Assert.Contains("This PR closes #42 when merged.", services.PullRequests.LastRequest.PullRequestBody);
+        Assert.Contains("https://github.com/caio/elevator-ads-mvp/issues/42", services.PullRequests.LastRequest.PullRequestBody);
         Assert.Contains("Agent Foreman", services.PullRequests.LastRequest.PullRequestBody);
         Assert.Contains("human review", services.PullRequests.LastRequest.PullRequestBody);
         Assert.Contains("plan.md", services.PullRequests.LastRequest.PullRequestBody);
         Assert.Contains("codex-exec.log", services.PullRequests.LastRequest.PullRequestBody);
+    }
+
+    [Fact]
+    public void SubmitStillDoesNotMergePr()
+    {
+        var services = SubmitTestServices.Valid();
+
+        var result = services.Execute(new[] { "submit", "42" });
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.DoesNotContain("merge", services.PullRequests.LastRequest!.PullRequestTitle, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -147,6 +162,18 @@ public sealed class CliSubmitTests
         Assert.Equal(MissionStatus.Failed, services.Missions.Saved.Last().Status);
         Assert.Contains("PR creation failed", result.Error);
     }
+
+    [Fact]
+    public void SubmitRecordsSubmitStartedAndPullRequestCreatedEvents()
+    {
+        var services = SubmitTestServices.Valid();
+
+        var result = services.Execute(new[] { "submit", "42" });
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains(services.Events.Events, e => e.EventType == MissionEventType.SubmitStarted);
+        Assert.Contains(services.Events.Events, e => e.EventType == MissionEventType.PullRequestCreated);
+    }
 }
 
 internal sealed class SubmitTestServices
@@ -158,19 +185,22 @@ internal sealed class SubmitTestServices
         FakeWorkItemProvider workItems,
         FakeMissionRepository missions,
         RecordingGitRepository gitRepo,
-        FakePullRequestProvider pullRequests)
+        FakePullRequestProvider pullRequests,
+        FakeMissionEventRecorder events)
     {
         _configLoader = configLoader;
         WorkItems = workItems;
         Missions = missions;
         GitRepo = gitRepo;
         PullRequests = pullRequests;
+        Events = events;
     }
 
     public FakeWorkItemProvider WorkItems { get; }
     public FakeMissionRepository Missions { get; }
     public RecordingGitRepository GitRepo { get; }
     public FakePullRequestProvider PullRequests { get; }
+    public FakeMissionEventRecorder Events { get; }
 
     public static SubmitTestServices Valid(
         RecordingGitRepository? gitRepo = null,
@@ -226,7 +256,8 @@ internal sealed class SubmitTestServices
             new FakeWorkItemProvider(workItemExists),
             missions,
             gitRepo ?? new RecordingGitRepository(currentBranch: "agent/issue-42"),
-            new FakePullRequestProvider(prSucceeds));
+            new FakePullRequestProvider(prSucceeds),
+            new FakeMissionEventRecorder());
     }
 
     public CommandResult Execute(IReadOnlyList<string> args)
@@ -242,7 +273,8 @@ internal sealed class SubmitTestServices
             gitRepository: GitRepo,
             workItemProvider: WorkItems,
             missionRepository: Missions,
-            pullRequestProvider: PullRequests);
+            pullRequestProvider: PullRequests,
+            missionEventRecorder: Events);
     }
 }
 

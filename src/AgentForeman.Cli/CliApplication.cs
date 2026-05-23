@@ -5,11 +5,13 @@ using CoreICommandRunner = AgentForeman.Core.Commands.ICommandRunner;
 using System.Text;
 using AgentForeman.Core.Coding;
 using AgentForeman.Core.Configuration;
+using AgentForeman.Core.Events;
 using AgentForeman.Core.Orchestration;
 using AgentForeman.Core.PullRequests;
 using AgentForeman.Core.Safety;
 using AgentForeman.Core.Testing;
 using AgentForeman.Core.Git;
+using AgentForeman.Core.Labels;
 using AgentForeman.Core.Planning;
 using AgentForeman.Core.Prerequisites;
 using AgentForeman.Core.State;
@@ -22,6 +24,7 @@ using AgentForeman.Infrastructure.Safety;
 using AgentForeman.Infrastructure.Testing;
 using AgentForeman.Infrastructure.Configuration;
 using AgentForeman.Infrastructure.Git;
+using AgentForeman.Infrastructure.Labels;
 using AgentForeman.Infrastructure.Planning;
 using AgentForeman.Infrastructure.Prerequisites;
 using AgentForeman.Infrastructure.State;
@@ -109,7 +112,10 @@ public static class CliApplication
         ISafetyChecker? safetyChecker = null,
         IPullRequestProvider? pullRequestProvider = null,
         IMissionOrchestrator? orchestrator = null,
-        IMissionBranchPreparer? branchPreparer = null)
+        IMissionBranchPreparer? branchPreparer = null,
+        IWorkItemDependencyResolver? dependencyResolver = null,
+        ILabelManager? labelManager = null,
+        IMissionEventRecorder? missionEventRecorder = null)
     {
         gitRepository ??= new CliGitRepository(commandRunner);
 
@@ -143,34 +149,39 @@ public static class CliApplication
             return RunGitCommand(args, configLoader, gitRepository);
         }
 
+        if (args[0] == "labels")
+        {
+            return RunLabelsCommand(args, configLoader, commandRunner, labelManager);
+        }
+
         if (args[0] == "work-items")
         {
-            return RunWorkItemsCommand(args, configLoader, commandRunner);
+            return RunWorkItemsCommand(args, configLoader, commandRunner, dependencyResolver);
         }
 
         if (args[0] == "plan")
         {
-            return RunPlanCommand(args, configLoader, commandRunner, workItemProvider, planningAgent, missionRepository);
+            return RunPlanCommand(args, configLoader, commandRunner, workItemProvider, planningAgent, missionRepository, missionEventRecorder);
         }
 
         if (args[0] == "execute")
         {
-            return RunExecuteCommand(args, configLoader, commandRunner, gitRepository, workItemProvider, codingAgent, missionRepository, branchPreparer);
+            return RunExecuteCommand(args, configLoader, commandRunner, gitRepository, workItemProvider, codingAgent, missionRepository, branchPreparer, missionEventRecorder);
         }
 
         if (args[0] == "verify")
         {
-            return RunVerifyCommand(args, configLoader, commandRunner, gitRepository, workItemProvider, missionRepository, testRunner, safetyChecker);
+            return RunVerifyCommand(args, configLoader, commandRunner, gitRepository, workItemProvider, missionRepository, testRunner, safetyChecker, missionEventRecorder);
         }
 
         if (args[0] == "submit")
         {
-            return RunSubmitCommand(args, configLoader, commandRunner, gitRepository, workItemProvider, missionRepository, pullRequestProvider);
+            return RunSubmitCommand(args, configLoader, commandRunner, gitRepository, workItemProvider, missionRepository, pullRequestProvider, missionEventRecorder);
         }
 
         if (args[0] == "run-once")
         {
-            return RunRunOnceCommand(args, configLoader, commandRunner, gitRepository, workItemProvider, planningAgent, codingAgent, testRunner, safetyChecker, pullRequestProvider, missionRepository, branchPreparer);
+            return RunRunOnceCommand(args, configLoader, commandRunner, gitRepository, workItemProvider, planningAgent, codingAgent, testRunner, safetyChecker, pullRequestProvider, missionRepository, branchPreparer, dependencyResolver, missionEventRecorder);
         }
 
         if (args[0] == "status")
@@ -178,19 +189,29 @@ public static class CliApplication
             return RunStatusCommand(args, configLoader, missionRepository);
         }
 
+        if (args[0] == "sync")
+        {
+            return RunSyncCommand(args, configLoader, commandRunner, workItemProvider, missionRepository, missionEventRecorder);
+        }
+
         if (args[0] == "resume")
         {
-            return RunResumeCommand(args, configLoader, commandRunner, gitRepository, workItemProvider, planningAgent, codingAgent, testRunner, safetyChecker, pullRequestProvider, missionRepository, branchPreparer);
+            return RunResumeCommand(args, configLoader, commandRunner, gitRepository, workItemProvider, planningAgent, codingAgent, testRunner, safetyChecker, pullRequestProvider, missionRepository, branchPreparer, dependencyResolver, missionEventRecorder);
         }
 
         if (args[0] == "cancel")
         {
-            return RunCancelCommand(args, configLoader, commandRunner, workItemProvider, missionRepository);
+            return RunCancelCommand(args, configLoader, commandRunner, workItemProvider, missionRepository, missionEventRecorder);
         }
 
         if (args[0] == "daemon")
         {
-            return RunDaemonCommand(args, configLoader, commandRunner, gitRepository, workItemProvider, planningAgent, codingAgent, testRunner, safetyChecker, pullRequestProvider, missionRepository, orchestrator, branchPreparer);
+            return RunDaemonCommand(args, configLoader, commandRunner, gitRepository, workItemProvider, planningAgent, codingAgent, testRunner, safetyChecker, pullRequestProvider, missionRepository, orchestrator, branchPreparer, dependencyResolver, missionEventRecorder);
+        }
+
+        if (args[0] == "events")
+        {
+            return RunEventsCommand(args, configLoader, missionEventRecorder);
         }
 
         var error = $"""
@@ -484,7 +505,8 @@ public static class CliApplication
     private static CommandResult RunWorkItemsCommand(
         IReadOnlyList<string> args,
         IAgentForemanConfigLoader configLoader,
-        CoreICommandRunner commandRunner)
+        CoreICommandRunner commandRunner,
+        IWorkItemDependencyResolver? dependencyResolver)
     {
         if (args.Count < 2)
         {
@@ -502,7 +524,9 @@ public static class CliApplication
             return new CommandResult(1, string.Empty, $"Unsupported work item provider: {configResult.Config.WorkItems.Provider}{Environment.NewLine}");
         }
 
-        var provider = new GitHubWorkItemProvider(configResult.Config, commandRunner);
+        var config = configResult.Config;
+        var provider = new GitHubWorkItemProvider(config, commandRunner);
+        dependencyResolver ??= new GitHubWorkItemDependencyResolver(config, commandRunner);
 
         try
         {
@@ -514,6 +538,17 @@ public static class CliApplication
                 {
                     lines.Add($"#{item.ExternalId} {item.Title}");
                     lines.Add(item.Url);
+                    lines.Add($"Labels: {string.Join(", ", item.Labels.Select(label => label.Name))}");
+                    var dependencies = item.Dependencies ?? Array.Empty<WorkItemDependency>();
+                    if (dependencies.Count > 0)
+                    {
+                        lines.Add("Dependencies:");
+                        foreach (var dependency in dependencies
+                                     .Select(dependency => dependencyResolver.ResolveAsync(dependency, CancellationToken.None).GetAwaiter().GetResult()))
+                        {
+                            lines.Add($"  #{dependency.Reference} {FormatDependencyStatus(dependency.Status)} - {FormatDependencyResolution(dependency.Status)}");
+                        }
+                    }
                 }
 
                 return new CommandResult(0, string.Join(Environment.NewLine, lines) + (lines.Count == 0 ? string.Empty : Environment.NewLine), string.Empty);
@@ -540,13 +575,62 @@ public static class CliApplication
         return new CommandResult(1, string.Empty, $"Unknown command: work-items {args[1]}{Environment.NewLine}");
     }
 
+    private static CommandResult RunLabelsCommand(
+        IReadOnlyList<string> args,
+        IAgentForemanConfigLoader configLoader,
+        CoreICommandRunner commandRunner,
+        ILabelManager? labelManager)
+    {
+        if (args.Count < 2)
+        {
+            return new CommandResult(1, string.Empty, $"Unknown command: labels{Environment.NewLine}");
+        }
+
+        var configResult = configLoader.Load(GetConfigPath(args));
+        if (!configResult.IsValid || configResult.Config is null)
+        {
+            return new CommandResult(1, string.Empty, string.Join(Environment.NewLine, configResult.Errors) + Environment.NewLine);
+        }
+
+        var config = configResult.Config;
+        if (!string.Equals(config.WorkItems.Provider, "github", StringComparison.OrdinalIgnoreCase))
+        {
+            return new CommandResult(1, string.Empty, $"Unsupported work item provider: {config.WorkItems.Provider}{Environment.NewLine}");
+        }
+
+        labelManager ??= new GitHubLabelManager(commandRunner);
+
+        try
+        {
+            if (args[1] == "list")
+            {
+                var labels = labelManager.ListAsync(config.WorkItems.Repo, CancellationToken.None).GetAwaiter().GetResult();
+                return new CommandResult(0, string.Join(Environment.NewLine, labels) + (labels.Count == 0 ? string.Empty : Environment.NewLine), string.Empty);
+            }
+
+            if (args[1] == "sync")
+            {
+                var result = labelManager.SyncAsync(config, CancellationToken.None).GetAwaiter().GetResult();
+                var lines = result.Results.Select(item => $"{item.Name}: {(item.Created ? "created" : "exists")}");
+                return new CommandResult(0, string.Join(Environment.NewLine, lines) + Environment.NewLine, string.Empty);
+            }
+        }
+        catch (Exception exception)
+        {
+            return new CommandResult(1, string.Empty, $"Label manager error: {exception.Message}{Environment.NewLine}");
+        }
+
+        return new CommandResult(1, string.Empty, $"Unknown command: labels {args[1]}{Environment.NewLine}");
+    }
+
     private static CommandResult RunPlanCommand(
         IReadOnlyList<string> args,
         IAgentForemanConfigLoader configLoader,
         CoreICommandRunner commandRunner,
         IWorkItemProvider? workItemProvider,
         IPlanningAgent? planningAgent,
-        IMissionRepository? missionRepository)
+        IMissionRepository? missionRepository,
+        IMissionEventRecorder? missionEventRecorder)
     {
         if (args.Count < 2)
         {
@@ -573,6 +657,7 @@ public static class CliApplication
         workItemProvider ??= new GitHubWorkItemProvider(config, commandRunner);
         planningAgent ??= new ClaudeCliPlanningAgent(commandRunner);
         missionRepository ??= new PostgresMissionRepository(config.Database.ConnectionString);
+        missionEventRecorder ??= new PostgresMissionEventRecorder(config.Database.ConnectionString);
 
         WorkItem item;
         try
@@ -608,6 +693,9 @@ public static class CliApplication
                 UpdatedAt = now,
             };
         missionRepository.Save(planningMission);
+        RecordMissionEvent(
+            missionEventRecorder,
+            CreateMissionEvent(planningMission.Id, item.ExternalId, MissionEventType.PlanningStarted, MissionEventLevel.Info, "Creating technical plan."));
 
         var outputDirectory = Path.Combine(config.Project.RepoPath, ".agent", "runs", $"issue-{SanitizePathSegment(item.ExternalId)}");
         var request = new PlanningRequest(
@@ -635,18 +723,31 @@ public static class CliApplication
                 UpdatedAt = DateTimeOffset.UtcNow,
             };
             missionRepository.Save(failedMission);
+            RecordMissionEvent(
+                missionEventRecorder,
+                CreateMissionEvent(failedMission.Id, item.ExternalId, MissionEventType.PlanningFailed, MissionEventLevel.Error, $"Planning failed: {exception.Message}"));
             return new CommandResult(1, string.Empty, $"Planning failed: {exception.Message}{Environment.NewLine}");
         }
 
         if (planResult.Success)
         {
-            missionRepository.Save(planningMission with
+            var completedMission = planningMission with
             {
                 Status = MissionStatus.PlanReady,
                 PlanPath = planResult.PlanPath,
                 LastError = null,
                 UpdatedAt = DateTimeOffset.UtcNow,
-            });
+            };
+            missionRepository.Save(completedMission);
+            RecordMissionEvent(
+                missionEventRecorder,
+                CreateMissionEvent(
+                    completedMission.Id,
+                    item.ExternalId,
+                    MissionEventType.PlanningCompleted,
+                    MissionEventLevel.Info,
+                    "Plan created.",
+                    $$"""{"planPath":"{{EscapeJson(planResult.PlanPath)}}"}"""));
             return new CommandResult(0, $"Plan created: {planResult.PlanPath}{Environment.NewLine}", string.Empty);
         }
 
@@ -654,25 +755,44 @@ public static class CliApplication
         {
             var retryAfter = DateTimeOffset.UtcNow.AddHours(config.Quota.RetryAfterHours ?? 1);
             var reason = "Claude quota or rate limit detected while creating the plan.";
-            missionRepository.Save(planningMission with
+            var pausedMission = planningMission with
             {
                 Status = MissionStatus.PausedQuota,
                 PlanPath = planResult.PlanPath,
                 RetryAfter = retryAfter,
                 LastError = planResult.ErrorMessage,
                 UpdatedAt = DateTimeOffset.UtcNow,
-            });
+            };
+            missionRepository.Save(pausedMission);
+            RecordMissionEvent(
+                missionEventRecorder,
+                CreateMissionEvent(
+                    pausedMission.Id,
+                    item.ExternalId,
+                    MissionEventType.MissionPausedQuota,
+                    MissionEventLevel.Warning,
+                    reason,
+                    $$"""{"retryAfter":"{{retryAfter:O}}"}"""));
             try { workItemProvider.MarkAsPausedAsync(item, reason, retryAfter, CancellationToken.None).GetAwaiter().GetResult(); } catch { }
             return new CommandResult(1, string.Empty, $"{reason} Retry after: {retryAfter:O}{Environment.NewLine}");
         }
 
-        missionRepository.Save(planningMission with
+        var failedPlanningMission = planningMission with
         {
             Status = MissionStatus.Failed,
             PlanPath = planResult.PlanPath,
             LastError = planResult.ErrorMessage,
             UpdatedAt = DateTimeOffset.UtcNow,
-        });
+        };
+        missionRepository.Save(failedPlanningMission);
+        RecordMissionEvent(
+            missionEventRecorder,
+            CreateMissionEvent(
+                failedPlanningMission.Id,
+                item.ExternalId,
+                MissionEventType.PlanningFailed,
+                MissionEventLevel.Error,
+                $"Planning failed: {planResult.ErrorMessage ?? "Claude planner failed."}"));
         return new CommandResult(1, string.Empty, $"Planning failed: {planResult.ErrorMessage ?? "Claude planner failed."}{Environment.NewLine}");
     }
 
@@ -713,7 +833,8 @@ public static class CliApplication
         IWorkItemProvider? workItemProvider,
         ICodingAgent? codingAgent,
         IMissionRepository? missionRepository,
-        IMissionBranchPreparer? branchPreparer = null)
+        IMissionBranchPreparer? branchPreparer = null,
+        IMissionEventRecorder? missionEventRecorder = null)
     {
         if (args.Count < 2)
         {
@@ -740,6 +861,7 @@ public static class CliApplication
         workItemProvider ??= new GitHubWorkItemProvider(config, commandRunner);
         codingAgent ??= new CodexCliCodingAgent(commandRunner);
         missionRepository ??= new PostgresMissionRepository(config.Database.ConnectionString);
+        missionEventRecorder ??= new PostgresMissionEventRecorder(config.Database.ConnectionString);
 
         WorkItem item;
         try
@@ -783,6 +905,9 @@ public static class CliApplication
                 UpdatedAt = now,
             };
         missionRepository.Save(codingMission);
+        RecordMissionEvent(
+            missionEventRecorder,
+            CreateMissionEvent(codingMission.Id, item.ExternalId, MissionEventType.ExecutionStarted, MissionEventLevel.Info, "Running Codex."));
 
         branchPreparer ??= new MissionBranchPreparer(gitRepository);
         var agentBranch = $"agent/issue-{item.ExternalId}";
@@ -791,14 +916,21 @@ public static class CliApplication
             CancellationToken.None).GetAwaiter().GetResult();
         if (!branchPrepResult.Success)
         {
-            missionRepository.Save(codingMission with
+            var failedMission = codingMission with
             {
                 Status = MissionStatus.Failed,
                 LastError = branchPrepResult.ErrorMessage,
                 UpdatedAt = DateTimeOffset.UtcNow,
-            });
+            };
+            missionRepository.Save(failedMission);
+            RecordMissionEvent(
+                missionEventRecorder,
+                CreateMissionEvent(failedMission.Id, item.ExternalId, MissionEventType.ExecutionFailed, MissionEventLevel.Error, $"Branch preparation failed: {branchPrepResult.ErrorMessage}"));
             return new CommandResult(1, string.Empty, $"Branch preparation failed: {branchPrepResult.ErrorMessage}{Environment.NewLine}");
         }
+        RecordMissionEvent(
+            missionEventRecorder,
+            CreateMissionEvent(codingMission.Id, item.ExternalId, MissionEventType.BranchPrepared, MissionEventLevel.Info, $"Prepared branch {agentBranch}."));
 
         var planContent = File.ReadAllText(planPath);
         var request = new CodingRequest(
@@ -823,23 +955,37 @@ public static class CliApplication
         }
         catch (Exception exception)
         {
-            missionRepository.Save(codingMission with
+            var failedMission = codingMission with
             {
                 Status = MissionStatus.Failed,
                 LastError = exception.Message,
                 UpdatedAt = DateTimeOffset.UtcNow,
-            });
+            };
+            missionRepository.Save(failedMission);
+            RecordMissionEvent(
+                missionEventRecorder,
+                CreateMissionEvent(failedMission.Id, item.ExternalId, MissionEventType.ExecutionFailed, MissionEventLevel.Error, $"Execution failed: {exception.Message}"));
             return new CommandResult(1, string.Empty, $"Execution failed: {exception.Message}{Environment.NewLine}");
         }
 
         if (codingResult.Success)
         {
-            missionRepository.Save(codingMission with
+            var completedMission = codingMission with
             {
                 Status = MissionStatus.CodingCompleted,
                 LastError = null,
                 UpdatedAt = DateTimeOffset.UtcNow,
-            });
+            };
+            missionRepository.Save(completedMission);
+            RecordMissionEvent(
+                missionEventRecorder,
+                CreateMissionEvent(
+                    completedMission.Id,
+                    item.ExternalId,
+                    MissionEventType.ExecutionCompleted,
+                    MissionEventLevel.Info,
+                    "Execution completed.",
+                    $$"""{"logPath":"{{EscapeJson(codingResult.LogPath)}}"}"""));
             var output = $"""
                 Execution completed.
                 Log path: {codingResult.LogPath}
@@ -852,23 +998,42 @@ public static class CliApplication
         {
             var retryAfter = DateTimeOffset.UtcNow.AddHours(config.Quota.RetryAfterHours ?? 1);
             var reason = "Codex quota or rate limit detected while executing the plan.";
-            missionRepository.Save(codingMission with
+            var pausedMission = codingMission with
             {
                 Status = MissionStatus.PausedQuota,
                 RetryAfter = retryAfter,
                 LastError = codingResult.ErrorMessage,
                 UpdatedAt = DateTimeOffset.UtcNow,
-            });
+            };
+            missionRepository.Save(pausedMission);
+            RecordMissionEvent(
+                missionEventRecorder,
+                CreateMissionEvent(
+                    pausedMission.Id,
+                    item.ExternalId,
+                    MissionEventType.MissionPausedQuota,
+                    MissionEventLevel.Warning,
+                    reason,
+                    $$"""{"retryAfter":"{{retryAfter:O}}"}"""));
             try { workItemProvider.AddCommentAsync(item, $"{reason} Retry after: {retryAfter:O}", CancellationToken.None).GetAwaiter().GetResult(); } catch { }
             return new CommandResult(1, string.Empty, $"{reason} Retry after: {retryAfter:O}{Environment.NewLine}");
         }
 
-        missionRepository.Save(codingMission with
+        var failedCodingMission = codingMission with
         {
             Status = MissionStatus.Failed,
             LastError = codingResult.ErrorMessage,
             UpdatedAt = DateTimeOffset.UtcNow,
-        });
+        };
+        missionRepository.Save(failedCodingMission);
+        RecordMissionEvent(
+            missionEventRecorder,
+            CreateMissionEvent(
+                failedCodingMission.Id,
+                item.ExternalId,
+                MissionEventType.ExecutionFailed,
+                MissionEventLevel.Error,
+                $"Execution failed: {codingResult.ErrorMessage ?? "Codex executor failed."}"));
         return new CommandResult(1, string.Empty, $"Execution failed: {codingResult.ErrorMessage ?? "Codex executor failed."}{Environment.NewLine}");
     }
 
@@ -880,6 +1045,49 @@ public static class CliApplication
             && output.Contains(pattern, StringComparison.OrdinalIgnoreCase));
     }
 
+    private static MissionEvent CreateMissionEvent(
+        string missionId,
+        string? externalWorkItemId,
+        MissionEventType eventType,
+        MissionEventLevel level,
+        string message,
+        string? metadataJson = null)
+    {
+        return new MissionEvent(
+            Guid.NewGuid().ToString("N"),
+            missionId,
+            externalWorkItemId,
+            RunId: null,
+            eventType,
+            level,
+            message,
+            metadataJson,
+            DateTimeOffset.UtcNow);
+    }
+
+    private static void RecordMissionEvent(IMissionEventRecorder recorder, MissionEvent missionEvent)
+    {
+        try
+        {
+            recorder.AppendMissionEventAsync(missionEvent, CancellationToken.None).GetAwaiter().GetResult();
+        }
+        catch
+        {
+        }
+    }
+
+    private static string EscapeJson(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        return value
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\"", "\\\"", StringComparison.Ordinal);
+    }
+
     private static CommandResult RunSubmitCommand(
         IReadOnlyList<string> args,
         IAgentForemanConfigLoader configLoader,
@@ -887,7 +1095,8 @@ public static class CliApplication
         IGitRepository gitRepository,
         IWorkItemProvider? workItemProvider,
         IMissionRepository? missionRepository,
-        IPullRequestProvider? pullRequestProvider)
+        IPullRequestProvider? pullRequestProvider,
+        IMissionEventRecorder? missionEventRecorder)
     {
         if (args.Count < 2)
         {
@@ -909,6 +1118,7 @@ public static class CliApplication
         workItemProvider ??= new GitHubWorkItemProvider(config, commandRunner);
         missionRepository ??= new PostgresMissionRepository(config.Database.ConnectionString);
         pullRequestProvider ??= new GitHubPullRequestProvider(commandRunner);
+        missionEventRecorder ??= new PostgresMissionEventRecorder(config.Database.ConnectionString);
 
         WorkItem item;
         try
@@ -951,6 +1161,9 @@ public static class CliApplication
             UpdatedAt = now,
         };
         missionRepository.Save(submittingMission);
+        RecordMissionEvent(
+            missionEventRecorder,
+            CreateMissionEvent(submittingMission.Id, item.ExternalId, MissionEventType.SubmitStarted, MissionEventLevel.Info, "Creating pull request."));
 
         gitRepository.AddAllAsync(config.Project.RepoPath).GetAwaiter().GetResult();
 
@@ -967,12 +1180,16 @@ public static class CliApplication
         }
         catch (Exception exception)
         {
-            missionRepository.Save(submittingMission with
+            var failedMission = submittingMission with
             {
                 Status = MissionStatus.Failed,
                 LastError = exception.Message,
                 UpdatedAt = DateTimeOffset.UtcNow,
-            });
+            };
+            missionRepository.Save(failedMission);
+            RecordMissionEvent(
+                missionEventRecorder,
+                CreateMissionEvent(failedMission.Id, item.ExternalId, MissionEventType.SubmitFailed, MissionEventLevel.Error, $"Push failed: {exception.Message}"));
             return new CommandResult(1, string.Empty, $"Push failed: {exception.Message}{Environment.NewLine}");
         }
 
@@ -996,34 +1213,52 @@ public static class CliApplication
         }
         catch (Exception exception)
         {
-            missionRepository.Save(submittingMission with
+            var failedMission = submittingMission with
             {
                 Status = MissionStatus.Failed,
                 LastError = exception.Message,
                 UpdatedAt = DateTimeOffset.UtcNow,
-            });
+            };
+            missionRepository.Save(failedMission);
+            RecordMissionEvent(
+                missionEventRecorder,
+                CreateMissionEvent(failedMission.Id, item.ExternalId, MissionEventType.SubmitFailed, MissionEventLevel.Error, $"PR creation failed: {exception.Message}"));
             return new CommandResult(1, string.Empty, $"PR creation failed: {exception.Message}{Environment.NewLine}");
         }
 
         if (!prResult.Success)
         {
-            missionRepository.Save(submittingMission with
+            var failedMission = submittingMission with
             {
                 Status = MissionStatus.Failed,
                 LastError = prResult.ErrorMessage,
                 UpdatedAt = DateTimeOffset.UtcNow,
-            });
+            };
+            missionRepository.Save(failedMission);
+            RecordMissionEvent(
+                missionEventRecorder,
+                CreateMissionEvent(failedMission.Id, item.ExternalId, MissionEventType.SubmitFailed, MissionEventLevel.Error, $"PR creation failed: {prResult.ErrorMessage ?? "gh pr create failed."}"));
             return new CommandResult(1, string.Empty,
                 $"PR creation failed: {prResult.ErrorMessage ?? "gh pr create failed."}{Environment.NewLine}");
         }
 
-        missionRepository.Save(submittingMission with
+        var completedMission = submittingMission with
         {
             Status = MissionStatus.PullRequestCreated,
             PullRequestUrl = prResult.PullRequestUrl,
             LastError = null,
             UpdatedAt = DateTimeOffset.UtcNow,
-        });
+        };
+        missionRepository.Save(completedMission);
+        RecordMissionEvent(
+            missionEventRecorder,
+            CreateMissionEvent(
+                completedMission.Id,
+                item.ExternalId,
+                MissionEventType.PullRequestCreated,
+                MissionEventLevel.Info,
+                "Pull request created.",
+                $$"""{"pullRequestUrl":"{{EscapeJson(prResult.PullRequestUrl)}}"}"""));
 
         var reviewWarning = string.Empty;
         try
@@ -1050,7 +1285,9 @@ public static class CliApplication
         ISafetyChecker? safetyChecker,
         IPullRequestProvider? pullRequestProvider,
         IMissionRepository? missionRepository,
-        IMissionBranchPreparer? branchPreparer = null)
+        IMissionBranchPreparer? branchPreparer = null,
+        IWorkItemDependencyResolver? dependencyResolver = null,
+        IMissionEventRecorder? missionEventRecorder = null)
     {
         if (args.Count < 2)
         {
@@ -1079,6 +1316,8 @@ public static class CliApplication
         safetyChecker ??= new GitSafetyChecker(gitRepository);
         pullRequestProvider ??= new GitHubPullRequestProvider(commandRunner);
         missionRepository ??= new PostgresMissionRepository(config.Database.ConnectionString);
+        dependencyResolver ??= new GitHubWorkItemDependencyResolver(config, commandRunner);
+        missionEventRecorder ??= new PostgresMissionEventRecorder(config.Database.ConnectionString);
 
         // Resolve external id from the input
         string externalId;
@@ -1145,7 +1384,7 @@ public static class CliApplication
         branchPreparer ??= new MissionBranchPreparer(gitRepository);
         var orchestrator = new MissionOrchestrator(
             workItemProvider, planningAgent, codingAgent, testRunner, safetyChecker,
-            pullRequestProvider, gitRepository, missionRepository, branchPreparer);
+            pullRequestProvider, gitRepository, missionRepository, branchPreparer, dependencyResolver, missionEventRecorder);
 
         var output = new StringBuilder();
         ResumeResult result;
@@ -1258,6 +1497,150 @@ public static class CliApplication
         return new CommandResult(0, output.ToString(), string.Empty);
     }
 
+    private static CommandResult RunSyncCommand(
+        IReadOnlyList<string> args,
+        IAgentForemanConfigLoader configLoader,
+        CoreICommandRunner commandRunner,
+        IWorkItemProvider? workItemProvider,
+        IMissionRepository? missionRepository,
+        IMissionEventRecorder? missionEventRecorder)
+    {
+        var configResult = configLoader.Load(GetConfigPath(args));
+        if (!configResult.IsValid || configResult.Config is null)
+        {
+            return new CommandResult(1, string.Empty, string.Join(Environment.NewLine, configResult.Errors) + Environment.NewLine);
+        }
+
+        var config = configResult.Config;
+        if (!string.Equals(config.WorkItems.Provider, "github", StringComparison.OrdinalIgnoreCase))
+        {
+            return new CommandResult(1, string.Empty, $"Unsupported work item provider: {config.WorkItems.Provider}{Environment.NewLine}");
+        }
+
+        var dryRun = args.Contains("--dry-run");
+        workItemProvider ??= new GitHubWorkItemProvider(config, commandRunner);
+        missionRepository ??= new PostgresMissionRepository(config.Database.ConnectionString);
+        missionEventRecorder ??= new PostgresMissionEventRecorder(config.Database.ConnectionString);
+
+        IReadOnlyList<Mission> missions;
+        try
+        {
+            missions = missionRepository.GetRecent(100);
+        }
+        catch (Exception exception)
+        {
+            return new CommandResult(1, string.Empty, $"Database error: {exception.Message}{Environment.NewLine}");
+        }
+
+        var output = new StringBuilder();
+        output.AppendLine("Synchronizing missions...");
+        output.AppendLine();
+
+        foreach (var mission in missions.Where(m => !string.IsNullOrWhiteSpace(m.ExternalWorkItemId)))
+        {
+            WorkItem item;
+            try
+            {
+                item = workItemProvider.GetWorkItemAsync(mission.ExternalWorkItemId!, CancellationToken.None).GetAwaiter().GetResult();
+            }
+            catch (Exception exception)
+            {
+                output.AppendLine(mission.Id);
+                output.AppendLine($"  Error: {exception.Message}");
+                output.AppendLine();
+                continue;
+            }
+
+            output.AppendLine(mission.Id);
+            output.AppendLine($"  GitHub state: {item.State.ToString().ToLowerInvariant()}");
+            output.AppendLine($"  Local status: {mission.Status}");
+
+            if (item.State == WorkItemState.Closed)
+            {
+                output.AppendLine("  Action: mark mission Completed, remove agent-review");
+
+                if (!dryRun)
+                {
+                    var completedMission = mission with
+                    {
+                        Status = MissionStatus.Completed,
+                        LastError = null,
+                        UpdatedAt = DateTimeOffset.UtcNow,
+                    };
+                    missionRepository.Save(completedMission);
+                    workItemProvider.MarkAsCompletedAsync(item, CancellationToken.None).GetAwaiter().GetResult();
+                    RecordMissionEvent(
+                        missionEventRecorder,
+                        CreateMissionEvent(completedMission.Id, completedMission.ExternalWorkItemId, MissionEventType.MissionCompleted, MissionEventLevel.Info, $"Mission synchronized as completed from closed GitHub issue #{item.ExternalId}."));
+                }
+            }
+            else if (mission.Status == MissionStatus.PullRequestCreated)
+            {
+                output.AppendLine("  Action: keep waiting for review");
+            }
+            else
+            {
+                output.AppendLine("  Action: no changes");
+            }
+
+            output.AppendLine();
+        }
+
+        output.AppendLine("Sync completed.");
+        return new CommandResult(0, output.ToString(), string.Empty);
+    }
+
+    private static CommandResult RunEventsCommand(
+        IReadOnlyList<string> args,
+        IAgentForemanConfigLoader configLoader,
+        IMissionEventRecorder? missionEventRecorder)
+    {
+        if (args.Count < 2)
+        {
+            return new CommandResult(1, string.Empty, $"Usage: agent-foreman events <missionId> [--limit <number>]{Environment.NewLine}");
+        }
+
+        var configResult = configLoader.Load(GetConfigPath(args));
+        if (!configResult.IsValid || configResult.Config is null)
+        {
+            return new CommandResult(1, string.Empty, string.Join(Environment.NewLine, configResult.Errors) + Environment.NewLine);
+        }
+
+        var config = configResult.Config;
+        missionEventRecorder ??= new PostgresMissionEventRecorder(config.Database.ConnectionString);
+
+        var limit = 50;
+        for (var i = 2; i < args.Count - 1; i++)
+        {
+            if (args[i] == "--limit" && int.TryParse(args[i + 1], out var parsedLimit) && parsedLimit > 0)
+            {
+                limit = parsedLimit;
+                break;
+            }
+        }
+
+        IReadOnlyList<MissionEvent> events;
+        try
+        {
+            events = missionEventRecorder.GetMissionEventsAsync(args[1], limit, CancellationToken.None).GetAwaiter().GetResult();
+        }
+        catch (Exception exception)
+        {
+            return new CommandResult(1, string.Empty, $"Database error: {exception.Message}{Environment.NewLine}");
+        }
+
+        var output = new StringBuilder();
+        output.AppendLine($"Events for {args[1]}");
+        output.AppendLine();
+
+        foreach (var missionEvent in events)
+        {
+            output.AppendLine($"{missionEvent.CreatedAt:O} [{missionEvent.Level}] {missionEvent.EventType} - {missionEvent.Message}");
+        }
+
+        return new CommandResult(0, output.ToString(), string.Empty);
+    }
+
     private static CommandResult RunDaemonCommand(
         IReadOnlyList<string> args,
         IAgentForemanConfigLoader configLoader,
@@ -1271,7 +1654,9 @@ public static class CliApplication
         IPullRequestProvider? pullRequestProvider,
         IMissionRepository? missionRepository,
         IMissionOrchestrator? orchestrator,
-        IMissionBranchPreparer? branchPreparer = null)
+        IMissionBranchPreparer? branchPreparer = null,
+        IWorkItemDependencyResolver? dependencyResolver = null,
+        IMissionEventRecorder? missionEventRecorder = null)
     {
         var runOnce = args.Contains("--once");
 
@@ -1304,10 +1689,12 @@ public static class CliApplication
         safetyChecker ??= new GitSafetyChecker(gitRepository);
         pullRequestProvider ??= new GitHubPullRequestProvider(commandRunner);
         missionRepository ??= new PostgresMissionRepository(config.Database.ConnectionString);
+        dependencyResolver ??= new GitHubWorkItemDependencyResolver(config, commandRunner);
+        missionEventRecorder ??= new PostgresMissionEventRecorder(config.Database.ConnectionString);
         branchPreparer ??= new MissionBranchPreparer(gitRepository);
         orchestrator ??= new MissionOrchestrator(
             workItemProvider, planningAgent, codingAgent, testRunner,
-            safetyChecker, pullRequestProvider, gitRepository, missionRepository, branchPreparer);
+            safetyChecker, pullRequestProvider, gitRepository, missionRepository, branchPreparer, dependencyResolver, missionEventRecorder);
 
         var pollInterval = intervalOverride ?? config.Daemon.PollIntervalSeconds;
         var output = new StringBuilder();
@@ -1418,7 +1805,8 @@ public static class CliApplication
         IAgentForemanConfigLoader configLoader,
         CoreICommandRunner commandRunner,
         IWorkItemProvider? workItemProvider,
-        IMissionRepository? missionRepository)
+        IMissionRepository? missionRepository,
+        IMissionEventRecorder? missionEventRecorder)
     {
         if (args.Count < 2)
         {
@@ -1451,6 +1839,7 @@ public static class CliApplication
 
         workItemProvider ??= new GitHubWorkItemProvider(config, commandRunner);
         missionRepository ??= new PostgresMissionRepository(config.Database.ConnectionString);
+        missionEventRecorder ??= new PostgresMissionEventRecorder(config.Database.ConnectionString);
 
         string externalId;
         Mission? mission = null;
@@ -1505,12 +1894,16 @@ public static class CliApplication
             return new CommandResult(0, $"Mission is already cancelled.{Environment.NewLine}", string.Empty);
         }
 
-        missionRepository.Save(mission with
+        var cancelledMission = mission with
         {
             Status = MissionStatus.Cancelled,
             LastError = reason,
             UpdatedAt = DateTimeOffset.UtcNow,
-        });
+        };
+        missionRepository.Save(cancelledMission);
+        RecordMissionEvent(
+            missionEventRecorder,
+            CreateMissionEvent(cancelledMission.Id, externalId, MissionEventType.MissionCancelled, MissionEventLevel.Warning, $"Mission cancelled: {reason}"));
 
         try
         {
@@ -1541,7 +1934,9 @@ public static class CliApplication
         ISafetyChecker? safetyChecker,
         IPullRequestProvider? pullRequestProvider,
         IMissionRepository? missionRepository,
-        IMissionBranchPreparer? branchPreparer = null)
+        IMissionBranchPreparer? branchPreparer = null,
+        IWorkItemDependencyResolver? dependencyResolver = null,
+        IMissionEventRecorder? missionEventRecorder = null)
     {
         var configResult = configLoader.Load(GetConfigPath(args));
         if (!configResult.IsValid || configResult.Config is null)
@@ -1562,11 +1957,13 @@ public static class CliApplication
         safetyChecker ??= new GitSafetyChecker(gitRepository);
         pullRequestProvider ??= new GitHubPullRequestProvider(commandRunner);
         missionRepository ??= new PostgresMissionRepository(config.Database.ConnectionString);
+        dependencyResolver ??= new GitHubWorkItemDependencyResolver(config, commandRunner);
+        missionEventRecorder ??= new PostgresMissionEventRecorder(config.Database.ConnectionString);
 
         branchPreparer ??= new MissionBranchPreparer(gitRepository);
         var orchestrator = new MissionOrchestrator(
             workItemProvider, planningAgent, codingAgent, testRunner, safetyChecker,
-            pullRequestProvider, gitRepository, missionRepository, branchPreparer);
+            pullRequestProvider, gitRepository, missionRepository, branchPreparer, dependencyResolver, missionEventRecorder);
 
         var output = new StringBuilder();
         RunOnceResult result;
@@ -1585,6 +1982,12 @@ public static class CliApplication
         if (result.NoReadyWorkItems)
         {
             output.AppendLine("No ready work items found.");
+            return new CommandResult(0, output.ToString(), string.Empty);
+        }
+
+        if (result.AllReadyItemsBlocked)
+        {
+            output.AppendLine("Ready work items found, but all are blocked by dependencies.");
             return new CommandResult(0, output.ToString(), string.Empty);
         }
 
@@ -1620,6 +2023,9 @@ public static class CliApplication
             lines.Add(string.Empty);
         }
 
+        lines.Add($"Closes #{item.ExternalId}");
+        lines.Add(string.Empty);
+        lines.Add($"This PR closes #{item.ExternalId} when merged.");
         lines.Add("This pull request was generated by **Agent Foreman** and requires human review before merging.");
         lines.Add(string.Empty);
         lines.Add("### Artifacts");
@@ -1634,6 +2040,26 @@ public static class CliApplication
         return string.Join(Environment.NewLine, lines);
     }
 
+    private static string FormatDependencyStatus(WorkItemDependencyStatus status)
+    {
+        return status switch
+        {
+            WorkItemDependencyStatus.Satisfied => "closed",
+            WorkItemDependencyStatus.Unsatisfied => "open",
+            _ => "unknown",
+        };
+    }
+
+    private static string FormatDependencyResolution(WorkItemDependencyStatus status)
+    {
+        return status switch
+        {
+            WorkItemDependencyStatus.Satisfied => "satisfied",
+            WorkItemDependencyStatus.Unsatisfied => "unsatisfied",
+            _ => "unknown",
+        };
+    }
+
     private static CommandResult RunVerifyCommand(
         IReadOnlyList<string> args,
         IAgentForemanConfigLoader configLoader,
@@ -1642,7 +2068,8 @@ public static class CliApplication
         IWorkItemProvider? workItemProvider,
         IMissionRepository? missionRepository,
         ITestRunner? testRunner,
-        ISafetyChecker? safetyChecker)
+        ISafetyChecker? safetyChecker,
+        IMissionEventRecorder? missionEventRecorder)
     {
         if (args.Count < 2)
         {
@@ -1665,6 +2092,7 @@ public static class CliApplication
         missionRepository ??= new PostgresMissionRepository(config.Database.ConnectionString);
         testRunner ??= new ConfiguredCommandTestRunner(commandRunner);
         safetyChecker ??= new GitSafetyChecker(gitRepository);
+        missionEventRecorder ??= new PostgresMissionEventRecorder(config.Database.ConnectionString);
 
         WorkItem item;
         try
@@ -1700,17 +2128,24 @@ public static class CliApplication
                 UpdatedAt = now,
             };
         missionRepository.Save(testingMission);
+        RecordMissionEvent(
+            missionEventRecorder,
+            CreateMissionEvent(testingMission.Id, item.ExternalId, MissionEventType.VerificationStarted, MissionEventLevel.Info, "Running safety checks and tests."));
 
         var safetyResult = safetyChecker.CheckAsync(config.Project.RepoPath, config.Safety, CancellationToken.None).GetAwaiter().GetResult();
         if (!safetyResult.Passed)
         {
             var violationMessages = string.Join(Environment.NewLine, safetyResult.Violations.Select(v => $"  - {v.Message}"));
-            missionRepository.Save(testingMission with
+            var failedMission = testingMission with
             {
                 Status = MissionStatus.Failed,
                 LastError = $"Safety check failed:{Environment.NewLine}{violationMessages}",
                 UpdatedAt = DateTimeOffset.UtcNow,
-            });
+            };
+            missionRepository.Save(failedMission);
+            RecordMissionEvent(
+                missionEventRecorder,
+                CreateMissionEvent(failedMission.Id, item.ExternalId, MissionEventType.VerificationFailed, MissionEventLevel.Error, "Safety check failed."));
             return new CommandResult(1, string.Empty,
                 $"Safety check failed:{Environment.NewLine}{violationMessages}{Environment.NewLine}");
         }
@@ -1729,23 +2164,37 @@ public static class CliApplication
         }
         catch (Exception exception)
         {
-            missionRepository.Save(testingMission with
+            var failedMission = testingMission with
             {
                 Status = MissionStatus.TestsFailed,
                 LastError = exception.Message,
                 UpdatedAt = DateTimeOffset.UtcNow,
-            });
+            };
+            missionRepository.Save(failedMission);
+            RecordMissionEvent(
+                missionEventRecorder,
+                CreateMissionEvent(failedMission.Id, item.ExternalId, MissionEventType.VerificationFailed, MissionEventLevel.Error, $"Tests failed: {exception.Message}"));
             return new CommandResult(1, string.Empty, $"Tests failed: {exception.Message}{Environment.NewLine}");
         }
 
         if (testResult.Success)
         {
-            missionRepository.Save(testingMission with
+            var completedMission = testingMission with
             {
                 Status = MissionStatus.TestsPassed,
                 LastError = null,
                 UpdatedAt = DateTimeOffset.UtcNow,
-            });
+            };
+            missionRepository.Save(completedMission);
+            RecordMissionEvent(
+                missionEventRecorder,
+                CreateMissionEvent(
+                    completedMission.Id,
+                    item.ExternalId,
+                    MissionEventType.VerificationCompleted,
+                    MissionEventLevel.Info,
+                    "Verification passed.",
+                    $$"""{"logPath":"{{EscapeJson(testResult.LogPath)}}"}"""));
             return new CommandResult(0,
                 $"""
                 Verification passed.
@@ -1755,12 +2204,21 @@ public static class CliApplication
                 string.Empty);
         }
 
-        missionRepository.Save(testingMission with
+        var failedTestingMission = testingMission with
         {
             Status = MissionStatus.TestsFailed,
             LastError = testResult.ErrorMessage,
             UpdatedAt = DateTimeOffset.UtcNow,
-        });
+        };
+        missionRepository.Save(failedTestingMission);
+        RecordMissionEvent(
+            missionEventRecorder,
+            CreateMissionEvent(
+                failedTestingMission.Id,
+                item.ExternalId,
+                MissionEventType.VerificationFailed,
+                MissionEventLevel.Error,
+                $"Verification failed: {testResult.ErrorMessage ?? "One or more test commands failed."}"));
 
         var failedCmd = testResult.CommandResults.FirstOrDefault(r => !r.Success);
         var errorDetail = new StringBuilder();

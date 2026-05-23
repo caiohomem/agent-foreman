@@ -28,6 +28,8 @@ public sealed class YamlAgentForemanConfigLoader : IAgentForemanConfigLoader
                 WorkingLabel = values.GetScalar("workItems", "workingLabel"),
                 ReviewLabel = values.GetScalar("workItems", "reviewLabel"),
                 PausedLabel = values.GetScalar("workItems", "pausedLabel"),
+                BlockedLabel = values.GetScalarOrDefault("workItems", "blockedLabel", "agent-blocked"),
+                FailedLabel = values.GetScalarOrDefault("workItems", "failedLabel", "agent-failed"),
             },
             Planner = new PlannerConfig
             {
@@ -140,6 +142,12 @@ internal sealed class SimpleYamlValues
             && sectionValues.TryGetValue(key, out var value)
             ? value
             : string.Empty;
+    }
+
+    public string GetScalarOrDefault(string section, string key, string defaultValue)
+    {
+        var value = GetScalar(section, key);
+        return string.IsNullOrWhiteSpace(value) ? defaultValue : value;
     }
 
     public int? GetNullableInt(string section, string key)

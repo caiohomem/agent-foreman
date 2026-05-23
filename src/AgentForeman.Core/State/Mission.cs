@@ -12,4 +12,5 @@ public sealed record Mission(
     DateTimeOffset? RetryAfter,
     string? LastError,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    DateTimeOffset? BlockedCommentPostedAt = null);
