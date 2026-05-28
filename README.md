@@ -84,7 +84,7 @@ dotnet run --project src/AgentForeman.Cli -- status
 dotnet run --project src/AgentForeman.Cli -- events github-24
 dotnet run --project src/AgentForeman.Cli -- summarize 24
 dotnet run --project src/AgentForeman.Cli -- resume github-24 --force
-dotnet run --project src/AgentForeman.Cli -- cancel github-24 "reason"
+dotnet run --project src/AgentForeman.Cli -- cancel github-24 --reason "reason"
 dotnet run --project src/AgentForeman.Cli -- sync --dry-run
 ```
 
@@ -95,6 +95,138 @@ dotnet run --project src/AgentForeman.Cli -- plan 24
 dotnet run --project src/AgentForeman.Cli -- execute 24
 dotnet run --project src/AgentForeman.Cli -- verify 24
 dotnet run --project src/AgentForeman.Cli -- submit 24
+```
+
+### Command Reference
+
+`help`, `--help`, `-h`
+
+Prints the CLI help text and exits without loading providers.
+
+`config validate [--config <path>]`
+
+Loads the configuration file and validates required sections. Use this before running missions when changing `agent-foreman.yaml`.
+
+`doctor [--config <path>]`
+
+Checks the config file, configured repository path, git repository status, and required local tools: `git`, `gh`, planner command, and executor command.
+
+`state init [--config <path>]`
+
+Initializes the configured PostgreSQL state schema.
+
+`state status [--config <path>]`
+
+Prints state store metadata such as provider, mission count, and provider-state count.
+
+`exec -- <command> [args...]`
+
+Runs an external process through Agent Foreman's command runner. This is mainly useful for validating process execution behavior in the same environment used by providers.
+
+`git status [--config <path>]`
+
+Inspects the configured `project.repoPath`, prints the current branch, and lists changed files as seen by Agent Foreman.
+
+`git diff [--config <path>]`
+
+Prints the current diff for the configured repository.
+
+`labels list [--config <path>]`
+
+Lists GitHub labels in the configured work-item repository.
+
+`labels sync [--config <path>]`
+
+Creates any missing Agent Foreman lifecycle labels in GitHub and reports whether each label was created or already existed.
+
+`work-items ready [--config <path>]`
+
+Lists GitHub issues that match the ready-work query and shows dependency status when dependencies are declared.
+
+`work-items view <workItemId> [--config <path>]`
+
+Prints a single work item, including title, URL, labels, and body.
+
+`plan <workItemId> [--config <path>]`
+
+Loads the GitHub issue, records a mission in `Planning`, invokes Claude CLI, writes `plan.md`, records mission events, and moves the mission to `PlanReady`. Quota/rate-limit output pauses the mission as `PausedQuota`.
+
+`execute <workItemId> [--config <path>]`
+
+Requires an existing `plan.md`, prepares branch `agent/issue-{id}`, invokes Codex CLI, writes `codex-exec.log`, records events, and moves the mission to `CodingCompleted`. Execution failures and quota pauses generate run summaries when possible.
+
+`verify <workItemId> [--config <path>]`
+
+Runs safety checks and configured test commands in `project.repoPath`, writes `tests.log`, and moves the mission to `TestsPassed` or `TestsFailed`. Failed verification generates failure and resume summaries when possible.
+
+`submit <workItemId> [--config <path>]`
+
+Requires `TestsPassed`, commits current changes on `agent/issue-{id}`, pushes the branch, creates a GitHub pull request, records `PullRequestCreated`, marks the work item for review, and generates a success summary.
+
+`run-once [--config <path>]`
+
+Runs one complete mission for the next ready and unblocked work item: plan, execute, verify, submit, event recording, and summary generation. If no work is ready, it exits successfully with a no-work message.
+
+`daemon [--once] [--interval <seconds>] [--config <path>]`
+
+Polls for ready work items and runs mission ticks. It creates `.agent/agent-foreman.lock` in the configured repo to prevent concurrent daemon instances. `--once` performs one tick and exits.
+
+`status [--all] [--status <MissionStatus>] [--config <path>]`
+
+Shows recent missions from PostgreSQL. By default it prints the latest 20. `--all` removes that limit, and `--status` filters by a mission status such as `PausedQuota`, `Failed`, `PullRequestCreated`, or `Completed`.
+
+`events <missionId> [--limit <number>] [--config <path>]`
+
+Prints structured mission events for one mission, newest repository data first according to the event recorder, with a default limit of 50.
+
+`summarize <missionId|externalWorkItemId> [--config <path>]`
+
+Loads a mission, reads available run artifacts, invokes Claude CLI to create the summary types appropriate for the mission status, writes summary files under `.agent/runs/issue-{id}/`, and saves records in `agent_run_summaries`.
+
+`resume <missionId> [--force] [--config <path>]`
+
+Resumes a paused mission when retry timing allows. `--force` allows retrying failed or not-yet-due paused missions, but it does not bypass repository cleanliness checks.
+
+`cancel <missionId> [--reason <text>] [--config <path>]`
+
+Marks a mission as `Cancelled`, records a cancellation event, and best-effort comments on the GitHub issue. Missions that already created a pull request are not cancelled because review is expected to continue manually.
+
+`sync [--dry-run] [--config <path>]`
+
+Compares local mission state with GitHub issue state. Closed GitHub issues are treated as completion truth: without `--dry-run`, the local mission is marked `Completed` and Agent Foreman review labels are cleaned up.
+
+### Mission Flow
+
+```mermaid
+flowchart TD
+    A[GitHub issue with agent-ready label] --> B{Dependencies satisfied?}
+    B -- No --> C[Skip this work item]
+    B -- Yes --> D[plan]
+    D --> E[Claude CLI writes plan.md]
+    E --> F[Mission status: PlanReady]
+    F --> G[execute]
+    G --> H[Prepare agent/issue-id branch]
+    H --> I[Codex CLI writes codex-exec.log]
+    I --> J[Mission status: CodingCompleted]
+    J --> K[verify]
+    K --> L[Safety checks and configured tests]
+    L --> M{Verification passed?}
+    M -- No --> N[Mission status: TestsFailed]
+    N --> O[Generate failure-summary.md and resume-context.md]
+    M -- Yes --> P[Mission status: TestsPassed]
+    P --> Q[submit]
+    Q --> R[Commit, push, create PR]
+    R --> S[Mission status: PullRequestCreated]
+    S --> T[Generate summary.md]
+    S --> U[Human review and merge]
+    U --> V[sync]
+    V --> W[Mission status: Completed]
+
+    D --> X{Quota or rate limit?}
+    G --> X
+    X -- Yes --> Y[Mission status: PausedQuota]
+    Y --> Z[resume after retryAfter or with --force]
+    Z --> D
 ```
 
 ## Mission Artifacts
