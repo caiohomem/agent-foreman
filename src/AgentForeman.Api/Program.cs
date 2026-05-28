@@ -27,6 +27,7 @@ builder.Services.AddSingleton(config);
 builder.Services.AddSingleton<IStateStore, PostgresStateStore>();
 builder.Services.AddSingleton<IMissionRepository>(_ => new PostgresMissionRepository(config.Database.ConnectionString));
 builder.Services.AddSingleton<IMissionEventRecorder>(_ => new PostgresMissionEventRecorder(config.Database.ConnectionString));
+builder.Services.AddSingleton<IRunSummaryRepository>(_ => new PostgresRunSummaryRepository(config.Database.ConnectionString));
 builder.Services.AddAgentForemanApi();
 
 var app = builder.Build();
@@ -54,7 +55,7 @@ static string ResolveConfigPath(IReadOnlyList<string> args)
     }
 
     var envPath = Environment.GetEnvironmentVariable("AGENT_FOREMAN_CONFIG");
-    return string.IsNullOrWhiteSpace(envPath) ? "agent-foreman.yaml" : envPath;
+    return string.IsNullOrWhiteSpace(envPath) ? "c:\\agent-foreman\\agent-foreman.yaml" : envPath;
 }
 
 public partial class Program;

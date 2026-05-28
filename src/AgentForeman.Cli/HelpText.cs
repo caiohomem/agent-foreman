@@ -27,6 +27,7 @@ public static class HelpText
           status    Show mission status.
           sync      Synchronize local mission state with GitHub issues.
           events    Show structured mission events.
+          summarize Generate run summaries for a mission.
           resume    Resume a paused mission.
           cancel    Cancel a mission.
           doctor    Check local prerequisites.

@@ -35,6 +35,16 @@ export type ApiMissionEvent = {
   createdAt: string;
 };
 
+export type ApiRunSummary = {
+  id: string;
+  missionId: string;
+  externalWorkItemId: string | null;
+  summaryType: string;
+  content: string;
+  path: string | null;
+  createdAt: string;
+};
+
 type MissionQuery = {
   status?: string;
   limit?: number;
@@ -70,12 +80,17 @@ export async function getMissionEvents(id: string): Promise<ApiMissionEvent[]> {
   return fetchJson<ApiMissionEvent[]>(`/api/missions/${id}/events`);
 }
 
+export async function getMissionSummaries(id: string): Promise<ApiRunSummary[]> {
+  return fetchJson<ApiRunSummary[]>(`/api/missions/${id}/summaries`);
+}
+
 async function fetchJson<T>(
   path: string,
   options: { allowNotFound?: boolean } = {},
 ): Promise<T> {
   const response = await fetch(new URL(path, apiBaseUrl), {
     cache: "no-store",
+    signal: AbortSignal.timeout(1500),
     headers: {
       Accept: "application/json",
     },

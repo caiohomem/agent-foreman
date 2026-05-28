@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import { LogLinks } from "@/components/log-links";
 import { MissionTimeline } from "@/components/mission-timeline";
+import { MissionSummaries } from "@/components/mission-summaries";
 import { StatusBadge } from "@/components/status-badge";
 import { getMissionDetail } from "@/lib/dashboard-data";
 
@@ -23,7 +24,7 @@ export default async function MissionDetailPage({
     notFound();
   }
 
-  const { mission, events, logs } = detail;
+  const { mission, events, logs, summaries } = detail;
 
   return (
     <div className="space-y-6">
@@ -70,6 +71,10 @@ export default async function MissionDetailPage({
               label="Status"
               value={<StatusBadge status={mission.status} context="mission" />}
             />
+            <MetaField
+              label="Stored status"
+              value={<code>{mission.rawStatus ?? mission.status}</code>}
+            />
             <MetaField label="Branch" value={<code>{mission.branch}</code>} />
             <MetaField
               label="Pull request URL"
@@ -96,6 +101,7 @@ export default async function MissionDetailPage({
         <LogLinks logs={logs} />
       </section>
 
+      <MissionSummaries summaries={summaries} />
       <MissionTimeline mission={mission} events={events} />
     </div>
   );

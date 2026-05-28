@@ -143,7 +143,36 @@ public sealed class ApiDashboardTests
         Assert.Equal("e-1", eventPayload[0].GetProperty("id").GetString());
     }
 
-    private static HttpClient CreateClient(FakeMissionRepository? missions = null, FakeMissionEventRecorder? events = null)
+    [Fact]
+    public async Task MissionSummariesEndpointReturnsSummaries()
+    {
+        var summaries = new FakeRunSummaryRepository();
+        await summaries.SaveRunSummaryAsync(
+            new RunSummary(
+                "s-1",
+                "m-1",
+                "42",
+                AgentForeman.Core.Summaries.RunSummaryType.SuccessSummary,
+                "## Summary",
+                ".agent/runs/issue-42/summary.md",
+                DateTimeOffset.UtcNow),
+            CancellationToken.None);
+
+        using var client = CreateClient(summaries: summaries);
+
+        var response = await client.GetAsync("/api/missions/m-1/summaries");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Single(payload.EnumerateArray());
+        Assert.Equal("SuccessSummary", payload[0].GetProperty("summaryType").GetString());
+    }
+
+    private static HttpClient CreateClient(
+        FakeMissionRepository? missions = null,
+        FakeMissionEventRecorder? events = null,
+        FakeRunSummaryRepository? summaries = null)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
@@ -154,6 +183,7 @@ public sealed class ApiDashboardTests
         builder.Services.AddAgentForemanApi();
         builder.Services.AddSingleton<IMissionRepository>(missions ?? new FakeMissionRepository());
         builder.Services.AddSingleton<IMissionEventRecorder>(events ?? new FakeMissionEventRecorder());
+        builder.Services.AddSingleton<IRunSummaryRepository>(summaries ?? new FakeRunSummaryRepository());
 
         var app = builder.Build();
         app.MapAgentForemanApi();

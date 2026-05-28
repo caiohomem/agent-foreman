@@ -1,56 +1,109 @@
-import type { ApiDashboardSummary, ApiMission, ApiMissionEvent } from "./api";
+import type {
+  ApiDashboardSummary,
+  ApiMission,
+  ApiMissionEvent,
+  ApiRunSummary,
+} from "./api";
+import {
+  dashboardSummary,
+  getMissionById as getMockMissionById,
+  getMissionEvents as getMockMissionEvents,
+  getMissionLogs as getMockMissionLogs,
+  missions as mockMissions,
+  reviewQueue as mockReviewQueue,
+  systemChecks,
+} from "./mockData";
 import {
   getDashboardSummary,
   getMission,
   getMissionEvents,
   getMissions,
+  getMissionSummaries,
 } from "./api";
 import type {
   Mission,
   MissionEvent,
   MissionLogLink,
   MissionStatus,
+  MissionSummary,
   SummaryMetric,
 } from "./types";
 
 export async function getDashboardOverview() {
-  const [summary, missions] = await Promise.all([
-    getDashboardSummary(),
-    getMissions({ limit: 50 }),
-  ]);
-  const adaptedMissions = missions.map(toMission);
+  try {
+    const [summary, missions] = await Promise.all([
+      getDashboardSummary(),
+      getMissions({ limit: 50 }),
+    ]);
+    const adaptedMissions = missions.map(toMission);
 
-  return {
-    summaryMetrics: toSummaryMetrics(summary),
-    attentionQueue: adaptedMissions.filter(
-      (mission) => mission.status === "PausedQuota" || mission.status === "Failed",
-    ),
-    reviewQueue: adaptedMissions.filter(
-      (mission) => mission.status === "PullRequestCreated",
-    ),
-    missions: adaptedMissions,
-  };
+    return {
+      summaryMetrics: toSummaryMetrics(summary),
+      attentionQueue: adaptedMissions.filter(
+        (mission) => mission.status === "PausedQuota" || mission.status === "Failed",
+      ),
+      reviewQueue: adaptedMissions.filter(
+        (mission) => mission.status === "PullRequestCreated",
+      ),
+      missions: adaptedMissions,
+      usingMockFallback: false,
+    };
+  } catch {
+    return {
+      summaryMetrics: dashboardSummary,
+      attentionQueue: mockMissions.filter(
+        (mission) => mission.status === "PausedQuota" || mission.status === "Failed",
+      ),
+      reviewQueue: mockReviewQueue,
+      missions: mockMissions,
+      usingMockFallback: true,
+    };
+  }
 }
 
 export async function getMissionList() {
-  const missions = await getMissions({ limit: 50 });
-  return missions.map(toMission);
+  try {
+    const missions = await getMissions({ limit: 50 });
+    return missions.map(toMission);
+  } catch {
+    return mockMissions;
+  }
 }
 
 export async function getMissionDetail(id: string) {
-  const mission = await getMission(id);
+  try {
+    const mission = await getMission(id);
 
-  if (!mission) {
-    return null;
+    if (!mission) {
+      return null;
+    }
+
+    const [events, summaries] = await Promise.all([
+      getMissionEvents(id),
+      getMissionSummaries(id),
+    ]);
+
+    return {
+      mission: toMission(mission),
+      events: events.map(toMissionEvent),
+      summaries: summaries.map(toMissionSummary),
+      logs: buildMissionLogs(toMission(mission), mission.planPath),
+      usingMockFallback: false,
+    };
+  } catch {
+    const mission = getMockMissionById(id);
+    if (!mission) {
+      return null;
+    }
+
+    return {
+      mission,
+      events: getMockMissionEvents(id),
+      summaries: [],
+      logs: getMockMissionLogs(id),
+      usingMockFallback: true,
+    };
   }
-
-  const [events] = await Promise.all([getMissionEvents(id)]);
-
-  return {
-    mission: toMission(mission),
-    events: events.map(toMissionEvent),
-    logs: buildMissionLogs(toMission(mission), mission.planPath),
-  };
 }
 
 export function toSummaryMetrics(summary: ApiDashboardSummary): SummaryMetric[] {
@@ -101,6 +154,7 @@ export function toMission(mission: ApiMission): Mission {
     workItemId: mission.externalWorkItemId ?? "Unknown",
     title: mission.title,
     status,
+    rawStatus: mission.status,
     statusNote: createStatusNote(status, mission),
     operatorSignal: createOperatorSignal(status, mission),
     branch: mission.branch ?? "No branch recorded",
@@ -119,12 +173,24 @@ export function toMissionEvent(event: ApiMissionEvent): MissionEvent {
     id: event.id,
     missionId: event.missionId,
     type: event.eventType,
-    summary: event.message,
+    category: mapEventCategory(event.eventType),
+    summary: createEventSummary(event.eventType, event.message),
     detail: metadataDetail
       ? `${event.message} Context: ${metadataDetail}`
       : event.message,
     occurredAt: formatTimestamp(event.createdAt),
     level: mapEventLevel(event.level),
+  };
+}
+
+export function toMissionSummary(summary: ApiRunSummary): MissionSummary {
+  return {
+    id: summary.id,
+    type: summary.summaryType,
+    title: createSummaryTitle(summary.summaryType),
+    content: summary.content,
+    path: summary.path ?? undefined,
+    createdAt: formatTimestamp(summary.createdAt),
   };
 }
 
@@ -248,6 +314,73 @@ function mapEventLevel(level: string): MissionEvent["level"] {
       return "error";
     default:
       return "info";
+  }
+}
+
+function mapEventCategory(eventType: string): MissionEvent["category"] {
+  switch (eventType) {
+    case "MissionStarted":
+    case "MissionCompleted":
+    case "MissionFailed":
+    case "MissionResumed":
+    case "MissionPausedQuota":
+    case "DependencyBlocked":
+      return "Lifecycle";
+    case "PlanningStarted":
+    case "PlanningCompleted":
+    case "PlanningFailed":
+      return "Planning";
+    case "BranchPrepared":
+    case "ExecutionStarted":
+    case "ExecutionCompleted":
+    case "ExecutionFailed":
+    case "RepairStarted":
+    case "RepairCompleted":
+      return "Execution";
+    case "VerificationStarted":
+    case "VerificationCompleted":
+    case "VerificationFailed":
+      return "Verification";
+    case "SubmitStarted":
+    case "SubmitFailed":
+    case "PullRequestCreated":
+      return "Submit";
+    default:
+      return "Summary";
+  }
+}
+
+function createEventSummary(eventType: string, fallback: string): string {
+  switch (eventType) {
+    case "MissionPausedQuota":
+      return "Mission paused after quota or rate-limit signal";
+    case "MissionFailed":
+      return "Mission stopped and needs operator attention";
+    case "MissionCompleted":
+      return "Mission reached a completed handoff state";
+    case "MissionResumed":
+      return "Mission resumed from a paused or failed state";
+    case "DependencyBlocked":
+      return "Mission could not start because dependencies are unresolved";
+    case "SubmitStarted":
+      return "Submit phase started";
+    case "SubmitFailed":
+      return "Submit phase failed";
+    default:
+      return fallback;
+  }
+}
+
+function createSummaryTitle(summaryType: string): string {
+  switch (summaryType) {
+    case "SuccessSummary":
+      return "Success summary";
+    case "FailureSummary":
+      return "Failure summary";
+    case "ResumeContext":
+      return "Resume context";
+    default:
+      return summaryType;
   }
 }
 

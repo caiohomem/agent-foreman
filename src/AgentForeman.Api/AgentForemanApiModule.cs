@@ -65,6 +65,15 @@ public static class AgentForemanApiModule
             return TypedResults.Ok(events);
         }).WithName("GetMissionEvents");
 
+        group.MapGet("/missions/{id}/summaries", async Task<Ok<IReadOnlyList<RunSummaryResponseDto>>> (
+            string id,
+            MissionDashboardQueries queries,
+            CancellationToken cancellationToken) =>
+        {
+            var summaries = await queries.GetRunSummariesAsync(id, cancellationToken);
+            return TypedResults.Ok(summaries);
+        }).WithName("GetMissionSummaries");
+
         return endpoints;
     }
 
@@ -109,11 +118,16 @@ public sealed class MissionDashboardQueries
 
     private readonly IMissionRepository _missionRepository;
     private readonly IMissionEventRecorder _missionEventRecorder;
+    private readonly IRunSummaryRepository _runSummaryRepository;
 
-    public MissionDashboardQueries(IMissionRepository missionRepository, IMissionEventRecorder missionEventRecorder)
+    public MissionDashboardQueries(
+        IMissionRepository missionRepository,
+        IMissionEventRecorder missionEventRecorder,
+        IRunSummaryRepository runSummaryRepository)
     {
         _missionRepository = missionRepository;
         _missionEventRecorder = missionEventRecorder;
+        _runSummaryRepository = runSummaryRepository;
     }
 
     public DashboardSummaryResponseDto GetSummary()
@@ -150,6 +164,15 @@ public sealed class MissionDashboardQueries
     {
         var events = await _missionEventRecorder.GetMissionEventsAsync(missionId, NormalizeLimit(limit, 50), cancellationToken);
         return events.Select(MapMissionEvent).ToList();
+    }
+
+    public async Task<IReadOnlyList<RunSummaryResponseDto>> GetRunSummariesAsync(string missionId, CancellationToken cancellationToken)
+    {
+        var summaries = await _runSummaryRepository.GetRunSummariesAsync(missionId, cancellationToken);
+        return summaries
+            .OrderByDescending(summary => summary.CreatedAt)
+            .Select(MapRunSummary)
+            .ToList();
     }
 
     private static int NormalizeLimit(int? limit, int defaultValue)
@@ -204,5 +227,17 @@ public sealed class MissionDashboardQueries
             missionEvent.Message,
             missionEvent.MetadataJson,
             missionEvent.CreatedAt);
+    }
+
+    private static RunSummaryResponseDto MapRunSummary(RunSummary runSummary)
+    {
+        return new RunSummaryResponseDto(
+            runSummary.Id,
+            runSummary.MissionId,
+            runSummary.ExternalWorkItemId,
+            runSummary.SummaryType.ToString(),
+            runSummary.Content,
+            runSummary.Path,
+            runSummary.CreatedAt);
     }
 }

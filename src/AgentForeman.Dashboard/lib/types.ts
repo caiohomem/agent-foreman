@@ -12,6 +12,7 @@ export type Mission = {
   workItemId: string;
   title: string;
   status: MissionStatus;
+  rawStatus?: string;
   statusNote: string;
   operatorSignal: string;
   branch: string;
@@ -26,10 +27,26 @@ export type MissionEvent = {
   id: string;
   missionId: string;
   type: string;
+  category?:
+    | "Lifecycle"
+    | "Planning"
+    | "Execution"
+    | "Verification"
+    | "Submit"
+    | "Summary";
   summary: string;
   detail: string;
   occurredAt: string;
   level: "info" | "success" | "warning" | "error";
+};
+
+export type MissionSummary = {
+  id: string;
+  type: "SuccessSummary" | "FailureSummary" | "ResumeContext" | string;
+  title: string;
+  content: string;
+  path?: string;
+  createdAt: string;
 };
 
 export type SystemCheckStatus = "OK" | "Warning" | "Failed";

@@ -54,6 +54,16 @@ public static class PostgresStateSchema
             created_at TIMESTAMPTZ NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS agent_run_summaries (
+            id TEXT PRIMARY KEY,
+            mission_id TEXT NOT NULL,
+            external_work_item_id TEXT NULL,
+            summary_type TEXT NOT NULL,
+            content TEXT NOT NULL,
+            path TEXT NULL,
+            created_at TIMESTAMPTZ NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS provider_states (
             provider TEXT PRIMARY KEY,
             status TEXT NOT NULL,

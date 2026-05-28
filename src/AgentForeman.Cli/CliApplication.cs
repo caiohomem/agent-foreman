@@ -15,6 +15,7 @@ using AgentForeman.Core.Labels;
 using AgentForeman.Core.Planning;
 using AgentForeman.Core.Prerequisites;
 using AgentForeman.Core.State;
+using AgentForeman.Core.Summaries;
 using AgentForeman.Core.WorkItems;
 using AgentForeman.Infrastructure.Coding;
 using AgentForeman.Infrastructure.Commands;
@@ -28,6 +29,7 @@ using AgentForeman.Infrastructure.Labels;
 using AgentForeman.Infrastructure.Planning;
 using AgentForeman.Infrastructure.Prerequisites;
 using AgentForeman.Infrastructure.State;
+using AgentForeman.Infrastructure.Summaries;
 using AgentForeman.Infrastructure.WorkItems;
 
 namespace AgentForeman.Cli;
@@ -115,7 +117,9 @@ public static class CliApplication
         IMissionBranchPreparer? branchPreparer = null,
         IWorkItemDependencyResolver? dependencyResolver = null,
         ILabelManager? labelManager = null,
-        IMissionEventRecorder? missionEventRecorder = null)
+        IMissionEventRecorder? missionEventRecorder = null,
+        IRunSummaryRepository? runSummaryRepository = null,
+        IRunSummaryGenerator? runSummaryGenerator = null)
     {
         gitRepository ??= new CliGitRepository(commandRunner);
 
@@ -166,22 +170,22 @@ public static class CliApplication
 
         if (args[0] == "execute")
         {
-            return RunExecuteCommand(args, configLoader, commandRunner, gitRepository, workItemProvider, codingAgent, missionRepository, branchPreparer, missionEventRecorder);
+            return RunExecuteCommand(args, configLoader, commandRunner, gitRepository, workItemProvider, codingAgent, missionRepository, branchPreparer, missionEventRecorder, runSummaryRepository, runSummaryGenerator);
         }
 
         if (args[0] == "verify")
         {
-            return RunVerifyCommand(args, configLoader, commandRunner, gitRepository, workItemProvider, missionRepository, testRunner, safetyChecker, missionEventRecorder);
+            return RunVerifyCommand(args, configLoader, commandRunner, gitRepository, workItemProvider, missionRepository, testRunner, safetyChecker, missionEventRecorder, runSummaryRepository, runSummaryGenerator);
         }
 
         if (args[0] == "submit")
         {
-            return RunSubmitCommand(args, configLoader, commandRunner, gitRepository, workItemProvider, missionRepository, pullRequestProvider, missionEventRecorder);
+            return RunSubmitCommand(args, configLoader, commandRunner, gitRepository, workItemProvider, missionRepository, pullRequestProvider, missionEventRecorder, runSummaryRepository, runSummaryGenerator);
         }
 
         if (args[0] == "run-once")
         {
-            return RunRunOnceCommand(args, configLoader, commandRunner, gitRepository, workItemProvider, planningAgent, codingAgent, testRunner, safetyChecker, pullRequestProvider, missionRepository, branchPreparer, dependencyResolver, missionEventRecorder);
+            return RunRunOnceCommand(args, configLoader, commandRunner, gitRepository, workItemProvider, planningAgent, codingAgent, testRunner, safetyChecker, pullRequestProvider, missionRepository, branchPreparer, dependencyResolver, missionEventRecorder, runSummaryRepository, runSummaryGenerator);
         }
 
         if (args[0] == "status")
@@ -196,7 +200,7 @@ public static class CliApplication
 
         if (args[0] == "resume")
         {
-            return RunResumeCommand(args, configLoader, commandRunner, gitRepository, workItemProvider, planningAgent, codingAgent, testRunner, safetyChecker, pullRequestProvider, missionRepository, branchPreparer, dependencyResolver, missionEventRecorder);
+            return RunResumeCommand(args, configLoader, commandRunner, gitRepository, workItemProvider, planningAgent, codingAgent, testRunner, safetyChecker, pullRequestProvider, missionRepository, branchPreparer, dependencyResolver, missionEventRecorder, runSummaryRepository, runSummaryGenerator);
         }
 
         if (args[0] == "cancel")
@@ -206,12 +210,17 @@ public static class CliApplication
 
         if (args[0] == "daemon")
         {
-            return RunDaemonCommand(args, configLoader, commandRunner, gitRepository, workItemProvider, planningAgent, codingAgent, testRunner, safetyChecker, pullRequestProvider, missionRepository, orchestrator, branchPreparer, dependencyResolver, missionEventRecorder);
+            return RunDaemonCommand(args, configLoader, commandRunner, gitRepository, workItemProvider, planningAgent, codingAgent, testRunner, safetyChecker, pullRequestProvider, missionRepository, orchestrator, branchPreparer, dependencyResolver, missionEventRecorder, runSummaryRepository, runSummaryGenerator);
         }
 
         if (args[0] == "events")
         {
             return RunEventsCommand(args, configLoader, missionEventRecorder);
+        }
+
+        if (args[0] == "summarize")
+        {
+            return RunSummarizeCommand(args, configLoader, commandRunner, gitRepository, workItemProvider, missionRepository, runSummaryRepository, runSummaryGenerator);
         }
 
         var error = $"""
@@ -834,7 +843,9 @@ public static class CliApplication
         ICodingAgent? codingAgent,
         IMissionRepository? missionRepository,
         IMissionBranchPreparer? branchPreparer = null,
-        IMissionEventRecorder? missionEventRecorder = null)
+        IMissionEventRecorder? missionEventRecorder = null,
+        IRunSummaryRepository? runSummaryRepository = null,
+        IRunSummaryGenerator? runSummaryGenerator = null)
     {
         if (args.Count < 2)
         {
@@ -862,6 +873,7 @@ public static class CliApplication
         codingAgent ??= new CodexCliCodingAgent(commandRunner);
         missionRepository ??= new PostgresMissionRepository(config.Database.ConnectionString);
         missionEventRecorder ??= new PostgresMissionEventRecorder(config.Database.ConnectionString);
+        var runSummaryService = CreateRunSummaryService(config, commandRunner, gitRepository, runSummaryRepository, runSummaryGenerator);
 
         WorkItem item;
         try
@@ -926,6 +938,7 @@ public static class CliApplication
             RecordMissionEvent(
                 missionEventRecorder,
                 CreateMissionEvent(failedMission.Id, item.ExternalId, MissionEventType.ExecutionFailed, MissionEventLevel.Error, $"Branch preparation failed: {branchPrepResult.ErrorMessage}"));
+            GenerateMissionSummaries(runSummaryService, failedMission, item, config.Project.RepoPath, outputDirectory);
             return new CommandResult(1, string.Empty, $"Branch preparation failed: {branchPrepResult.ErrorMessage}{Environment.NewLine}");
         }
         RecordMissionEvent(
@@ -965,6 +978,7 @@ public static class CliApplication
             RecordMissionEvent(
                 missionEventRecorder,
                 CreateMissionEvent(failedMission.Id, item.ExternalId, MissionEventType.ExecutionFailed, MissionEventLevel.Error, $"Execution failed: {exception.Message}"));
+            GenerateMissionSummaries(runSummaryService, failedMission, item, config.Project.RepoPath, outputDirectory);
             return new CommandResult(1, string.Empty, $"Execution failed: {exception.Message}{Environment.NewLine}");
         }
 
@@ -1016,6 +1030,7 @@ public static class CliApplication
                     reason,
                     $$"""{"retryAfter":"{{retryAfter:O}}"}"""));
             try { workItemProvider.AddCommentAsync(item, $"{reason} Retry after: {retryAfter:O}", CancellationToken.None).GetAwaiter().GetResult(); } catch { }
+            GenerateMissionSummaries(runSummaryService, pausedMission, item, config.Project.RepoPath, outputDirectory);
             return new CommandResult(1, string.Empty, $"{reason} Retry after: {retryAfter:O}{Environment.NewLine}");
         }
 
@@ -1034,6 +1049,7 @@ public static class CliApplication
                 MissionEventType.ExecutionFailed,
                 MissionEventLevel.Error,
                 $"Execution failed: {codingResult.ErrorMessage ?? "Codex executor failed."}"));
+        GenerateMissionSummaries(runSummaryService, failedCodingMission, item, config.Project.RepoPath, outputDirectory);
         return new CommandResult(1, string.Empty, $"Execution failed: {codingResult.ErrorMessage ?? "Codex executor failed."}{Environment.NewLine}");
     }
 
@@ -1096,7 +1112,9 @@ public static class CliApplication
         IWorkItemProvider? workItemProvider,
         IMissionRepository? missionRepository,
         IPullRequestProvider? pullRequestProvider,
-        IMissionEventRecorder? missionEventRecorder)
+        IMissionEventRecorder? missionEventRecorder,
+        IRunSummaryRepository? runSummaryRepository = null,
+        IRunSummaryGenerator? runSummaryGenerator = null)
     {
         if (args.Count < 2)
         {
@@ -1119,6 +1137,7 @@ public static class CliApplication
         missionRepository ??= new PostgresMissionRepository(config.Database.ConnectionString);
         pullRequestProvider ??= new GitHubPullRequestProvider(commandRunner);
         missionEventRecorder ??= new PostgresMissionEventRecorder(config.Database.ConnectionString);
+        var runSummaryService = CreateRunSummaryService(config, commandRunner, gitRepository, runSummaryRepository, runSummaryGenerator);
 
         WorkItem item;
         try
@@ -1164,6 +1183,14 @@ public static class CliApplication
         RecordMissionEvent(
             missionEventRecorder,
             CreateMissionEvent(submittingMission.Id, item.ExternalId, MissionEventType.SubmitStarted, MissionEventLevel.Info, "Creating pull request."));
+        string? summaryDiff = null;
+        try
+        {
+            summaryDiff = gitRepository.GetDiffAsync(config.Project.RepoPath, CancellationToken.None).GetAwaiter().GetResult();
+        }
+        catch
+        {
+        }
 
         gitRepository.AddAllAsync(config.Project.RepoPath).GetAwaiter().GetResult();
 
@@ -1259,6 +1286,7 @@ public static class CliApplication
                 MissionEventLevel.Info,
                 "Pull request created.",
                 $$"""{"pullRequestUrl":"{{EscapeJson(prResult.PullRequestUrl)}}"}"""));
+        var summaryPaths = GenerateMissionSummaries(runSummaryService, completedMission, item, config.Project.RepoPath, outputDirectory, summaryDiff);
 
         var reviewWarning = string.Empty;
         try
@@ -1270,7 +1298,97 @@ public static class CliApplication
             reviewWarning = $"Warning: could not update work item labels: {ex.Message}{Environment.NewLine}";
         }
 
-        return new CommandResult(0, $"Pull request created: {prResult.PullRequestUrl}{Environment.NewLine}{reviewWarning}", string.Empty);
+        var output = new StringBuilder();
+        output.AppendLine($"Pull request created: {prResult.PullRequestUrl}");
+        foreach (var path in summaryPaths)
+        {
+            output.AppendLine($"Summary: {path}");
+        }
+        if (!string.IsNullOrWhiteSpace(reviewWarning))
+        {
+            output.Append(reviewWarning);
+        }
+
+        return new CommandResult(0, output.ToString(), string.Empty);
+    }
+
+    private static CommandResult RunSummarizeCommand(
+        IReadOnlyList<string> args,
+        IAgentForemanConfigLoader configLoader,
+        CoreICommandRunner commandRunner,
+        IGitRepository gitRepository,
+        IWorkItemProvider? workItemProvider,
+        IMissionRepository? missionRepository,
+        IRunSummaryRepository? runSummaryRepository,
+        IRunSummaryGenerator? runSummaryGenerator)
+    {
+        if (args.Count < 2)
+        {
+            return new CommandResult(1, string.Empty, $"Usage: agent-foreman summarize <missionId>{Environment.NewLine}");
+        }
+
+        var configResult = configLoader.Load(GetConfigPath(args));
+        if (!configResult.IsValid || configResult.Config is null)
+        {
+            return new CommandResult(1, string.Empty, string.Join(Environment.NewLine, configResult.Errors) + Environment.NewLine);
+        }
+
+        var config = configResult.Config;
+        missionRepository ??= new PostgresMissionRepository(config.Database.ConnectionString);
+        var missionIdArg = args[1];
+        var mission = missionRepository.GetById(missionIdArg);
+        if (mission is null && !missionIdArg.Contains('-', StringComparison.Ordinal))
+        {
+            mission = FindMissionByExternalId(missionRepository, missionIdArg);
+        }
+
+        if (mission is null)
+        {
+            return new CommandResult(1, string.Empty, $"Mission not found: {missionIdArg}{Environment.NewLine}");
+        }
+
+        var issueTitle = mission.Title;
+        var issueBody = string.Empty;
+        var externalId = mission.ExternalWorkItemId;
+
+        if (!string.IsNullOrWhiteSpace(externalId)
+            && string.Equals(config.WorkItems.Provider, "github", StringComparison.OrdinalIgnoreCase))
+        {
+            workItemProvider ??= new GitHubWorkItemProvider(config, commandRunner);
+
+            try
+            {
+                var item = workItemProvider.GetWorkItemAsync(externalId, CancellationToken.None).GetAwaiter().GetResult();
+                issueTitle = item.Title;
+                issueBody = item.Body;
+            }
+            catch
+            {
+            }
+        }
+
+        var outputKey = mission.ExternalWorkItemId ?? mission.Id;
+        var outputDirectory = Path.Combine(config.Project.RepoPath, ".agent", "runs", $"issue-{SanitizePathSegment(outputKey)}");
+        var runSummaryService = CreateRunSummaryService(config, commandRunner, gitRepository, runSummaryRepository, runSummaryGenerator);
+        var summaries = runSummaryService.GenerateAndSaveAsync(
+            new RunSummaryGenerationRequest(
+                mission,
+                config.Project.RepoPath,
+                outputDirectory,
+                issueTitle,
+                issueBody,
+                mission.Status,
+                GetSummaryTypesForMission(mission.Status),
+                mission.PullRequestUrl),
+            CancellationToken.None).GetAwaiter().GetResult();
+
+        var output = new StringBuilder();
+        foreach (var summary in summaries)
+        {
+            output.AppendLine($"{summary.SummaryType}: {summary.Path}");
+        }
+
+        return new CommandResult(0, output.ToString(), string.Empty);
     }
 
     private static CommandResult RunResumeCommand(
@@ -1287,7 +1405,9 @@ public static class CliApplication
         IMissionRepository? missionRepository,
         IMissionBranchPreparer? branchPreparer = null,
         IWorkItemDependencyResolver? dependencyResolver = null,
-        IMissionEventRecorder? missionEventRecorder = null)
+        IMissionEventRecorder? missionEventRecorder = null,
+        IRunSummaryRepository? runSummaryRepository = null,
+        IRunSummaryGenerator? runSummaryGenerator = null)
     {
         if (args.Count < 2)
         {
@@ -1381,10 +1501,11 @@ public static class CliApplication
                 $"Mission is failed. Use --force to retry.{Environment.NewLine}");
         }
 
+        var runSummaryService = CreateRunSummaryService(config, commandRunner, gitRepository, runSummaryRepository, runSummaryGenerator);
         branchPreparer ??= new MissionBranchPreparer(gitRepository);
         var orchestrator = new MissionOrchestrator(
             workItemProvider, planningAgent, codingAgent, testRunner, safetyChecker,
-            pullRequestProvider, gitRepository, missionRepository, branchPreparer, dependencyResolver, missionEventRecorder);
+            pullRequestProvider, gitRepository, missionRepository, branchPreparer, dependencyResolver, missionEventRecorder, runSummaryService);
 
         var output = new StringBuilder();
         ResumeResult result;
@@ -1656,7 +1777,9 @@ public static class CliApplication
         IMissionOrchestrator? orchestrator,
         IMissionBranchPreparer? branchPreparer = null,
         IWorkItemDependencyResolver? dependencyResolver = null,
-        IMissionEventRecorder? missionEventRecorder = null)
+        IMissionEventRecorder? missionEventRecorder = null,
+        IRunSummaryRepository? runSummaryRepository = null,
+        IRunSummaryGenerator? runSummaryGenerator = null)
     {
         var runOnce = args.Contains("--once");
 
@@ -1691,10 +1814,11 @@ public static class CliApplication
         missionRepository ??= new PostgresMissionRepository(config.Database.ConnectionString);
         dependencyResolver ??= new GitHubWorkItemDependencyResolver(config, commandRunner);
         missionEventRecorder ??= new PostgresMissionEventRecorder(config.Database.ConnectionString);
+        var runSummaryService = CreateRunSummaryService(config, commandRunner, gitRepository, runSummaryRepository, runSummaryGenerator);
         branchPreparer ??= new MissionBranchPreparer(gitRepository);
         orchestrator ??= new MissionOrchestrator(
             workItemProvider, planningAgent, codingAgent, testRunner,
-            safetyChecker, pullRequestProvider, gitRepository, missionRepository, branchPreparer, dependencyResolver, missionEventRecorder);
+            safetyChecker, pullRequestProvider, gitRepository, missionRepository, branchPreparer, dependencyResolver, missionEventRecorder, runSummaryService);
 
         var pollInterval = intervalOverride ?? config.Daemon.PollIntervalSeconds;
         var output = new StringBuilder();
@@ -1936,7 +2060,9 @@ public static class CliApplication
         IMissionRepository? missionRepository,
         IMissionBranchPreparer? branchPreparer = null,
         IWorkItemDependencyResolver? dependencyResolver = null,
-        IMissionEventRecorder? missionEventRecorder = null)
+        IMissionEventRecorder? missionEventRecorder = null,
+        IRunSummaryRepository? runSummaryRepository = null,
+        IRunSummaryGenerator? runSummaryGenerator = null)
     {
         var configResult = configLoader.Load(GetConfigPath(args));
         if (!configResult.IsValid || configResult.Config is null)
@@ -1959,11 +2085,12 @@ public static class CliApplication
         missionRepository ??= new PostgresMissionRepository(config.Database.ConnectionString);
         dependencyResolver ??= new GitHubWorkItemDependencyResolver(config, commandRunner);
         missionEventRecorder ??= new PostgresMissionEventRecorder(config.Database.ConnectionString);
+        var runSummaryService = CreateRunSummaryService(config, commandRunner, gitRepository, runSummaryRepository, runSummaryGenerator);
 
         branchPreparer ??= new MissionBranchPreparer(gitRepository);
         var orchestrator = new MissionOrchestrator(
             workItemProvider, planningAgent, codingAgent, testRunner, safetyChecker,
-            pullRequestProvider, gitRepository, missionRepository, branchPreparer, dependencyResolver, missionEventRecorder);
+            pullRequestProvider, gitRepository, missionRepository, branchPreparer, dependencyResolver, missionEventRecorder, runSummaryService);
 
         var output = new StringBuilder();
         RunOnceResult result;
@@ -2040,6 +2167,81 @@ public static class CliApplication
         return string.Join(Environment.NewLine, lines);
     }
 
+    private static RunSummaryService CreateRunSummaryService(
+        AgentForemanConfig config,
+        CoreICommandRunner commandRunner,
+        IGitRepository gitRepository,
+        IRunSummaryRepository? repository,
+        IRunSummaryGenerator? generator)
+    {
+        repository ??= new PostgresRunSummaryRepository(config.Database.ConnectionString);
+        generator ??= new ClaudeCliRunSummaryGenerator(commandRunner, config.Planner.Command);
+        return new RunSummaryService(generator, repository, gitRepository);
+    }
+
+    private static IReadOnlyList<RunSummaryType> GetSummaryTypesForMission(MissionStatus status)
+    {
+        return status switch
+        {
+            MissionStatus.PullRequestCreated or MissionStatus.Completed => [RunSummaryType.SuccessSummary],
+            MissionStatus.PausedQuota => [RunSummaryType.ResumeContext],
+            MissionStatus.Failed or MissionStatus.TestsFailed => [RunSummaryType.FailureSummary, RunSummaryType.ResumeContext],
+            _ => [RunSummaryType.ResumeContext],
+        };
+    }
+
+    private static Mission? FindMissionByExternalId(IMissionRepository missionRepository, string externalId)
+    {
+        foreach (var status in Enum.GetValues<MissionStatus>())
+        {
+            var mission = missionRepository
+                .GetByStatus(status, 200)
+                .FirstOrDefault(item => string.Equals(item.ExternalWorkItemId, externalId, StringComparison.OrdinalIgnoreCase));
+
+            if (mission is not null)
+            {
+                return mission;
+            }
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<string> GenerateMissionSummaries(
+        RunSummaryService runSummaryService,
+        Mission mission,
+        WorkItem item,
+        string repoPath,
+        string outputDirectory,
+        string? currentGitDiff = null)
+    {
+        try
+        {
+            var summaries = runSummaryService.GenerateAndSaveAsync(
+                new RunSummaryGenerationRequest(
+                    mission,
+                    repoPath,
+                    outputDirectory,
+                    item.Title,
+                    item.Body,
+                    mission.Status,
+                    GetSummaryTypesForMission(mission.Status),
+                    mission.PullRequestUrl,
+                    currentGitDiff),
+                CancellationToken.None).GetAwaiter().GetResult();
+
+            return summaries
+                .Select(summary => summary.Path)
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Cast<string>()
+                .ToList();
+        }
+        catch
+        {
+            return Array.Empty<string>();
+        }
+    }
+
     private static string FormatDependencyStatus(WorkItemDependencyStatus status)
     {
         return status switch
@@ -2069,7 +2271,9 @@ public static class CliApplication
         IMissionRepository? missionRepository,
         ITestRunner? testRunner,
         ISafetyChecker? safetyChecker,
-        IMissionEventRecorder? missionEventRecorder)
+        IMissionEventRecorder? missionEventRecorder,
+        IRunSummaryRepository? runSummaryRepository = null,
+        IRunSummaryGenerator? runSummaryGenerator = null)
     {
         if (args.Count < 2)
         {
@@ -2093,6 +2297,7 @@ public static class CliApplication
         testRunner ??= new ConfiguredCommandTestRunner(commandRunner);
         safetyChecker ??= new GitSafetyChecker(gitRepository);
         missionEventRecorder ??= new PostgresMissionEventRecorder(config.Database.ConnectionString);
+        var runSummaryService = CreateRunSummaryService(config, commandRunner, gitRepository, runSummaryRepository, runSummaryGenerator);
 
         WorkItem item;
         try
@@ -2146,6 +2351,7 @@ public static class CliApplication
             RecordMissionEvent(
                 missionEventRecorder,
                 CreateMissionEvent(failedMission.Id, item.ExternalId, MissionEventType.VerificationFailed, MissionEventLevel.Error, "Safety check failed."));
+            GenerateMissionSummaries(runSummaryService, failedMission, item, config.Project.RepoPath, Path.Combine(config.Project.RepoPath, ".agent", "runs", $"issue-{SanitizePathSegment(item.ExternalId)}"));
             return new CommandResult(1, string.Empty,
                 $"Safety check failed:{Environment.NewLine}{violationMessages}{Environment.NewLine}");
         }
@@ -2174,6 +2380,7 @@ public static class CliApplication
             RecordMissionEvent(
                 missionEventRecorder,
                 CreateMissionEvent(failedMission.Id, item.ExternalId, MissionEventType.VerificationFailed, MissionEventLevel.Error, $"Tests failed: {exception.Message}"));
+            GenerateMissionSummaries(runSummaryService, failedMission, item, config.Project.RepoPath, outputDirectory);
             return new CommandResult(1, string.Empty, $"Tests failed: {exception.Message}{Environment.NewLine}");
         }
 
@@ -2219,6 +2426,7 @@ public static class CliApplication
                 MissionEventType.VerificationFailed,
                 MissionEventLevel.Error,
                 $"Verification failed: {testResult.ErrorMessage ?? "One or more test commands failed."}"));
+        GenerateMissionSummaries(runSummaryService, failedTestingMission, item, config.Project.RepoPath, outputDirectory);
 
         var failedCmd = testResult.CommandResults.FirstOrDefault(r => !r.Success);
         var errorDetail = new StringBuilder();

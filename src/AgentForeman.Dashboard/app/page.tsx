@@ -7,7 +7,7 @@ import { getDashboardOverview } from "@/lib/dashboard-data";
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const { attentionQueue, reviewQueue, summaryMetrics } =
+  const { attentionQueue, reviewQueue, summaryMetrics, usingMockFallback } =
     await getDashboardOverview();
   const systemWarnings = systemChecks.filter((check) => check.status !== "OK");
 
@@ -35,6 +35,11 @@ export default async function HomePage() {
               {reviewQueue.length} pull request
               {reviewQueue.length === 1 ? "" : "s"} waiting for review.
             </p>
+            {usingMockFallback ? (
+              <p className="text-xs leading-5 text-[var(--muted-foreground)]">
+                API unavailable. Showing local mock snapshot.
+              </p>
+            ) : null}
           </div>
         </div>
       </section>

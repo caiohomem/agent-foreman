@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   toMission,
   toMissionEvent,
+  toMissionSummary,
   toSummaryMetrics,
 } from "./dashboard-data.ts";
 
@@ -65,4 +66,21 @@ test("toMissionEvent adapts API events into timeline entries", () => {
   assert.equal(event.level, "error");
   assert.match(event.summary, /Tests failed/i);
   assert.match(event.detail, /stage/i);
+});
+
+test("toMissionSummary adapts saved run summaries", () => {
+  const summary = toMissionSummary({
+    id: "sum-1",
+    missionId: "github-42",
+    externalWorkItemId: "42",
+    summaryType: "ResumeContext",
+    content: "## Resume\n- Pick up from verify",
+    path: ".agent/runs/issue-42/resume-context.md",
+    createdAt: "2026-05-23T11:00:00+00:00",
+  });
+
+  assert.equal(summary.type, "ResumeContext");
+  assert.equal(summary.title, "Resume context");
+  assert.match(summary.content, /Pick up from verify/i);
+  assert.match(summary.path ?? "", /resume-context\.md/i);
 });

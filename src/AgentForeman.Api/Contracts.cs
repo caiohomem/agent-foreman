@@ -35,3 +35,12 @@ public sealed record MissionEventResponseDto(
     string Message,
     string? MetadataJson,
     DateTimeOffset CreatedAt);
+
+public sealed record RunSummaryResponseDto(
+    string Id,
+    string MissionId,
+    string? ExternalWorkItemId,
+    string SummaryType,
+    string Content,
+    string? Path,
+    DateTimeOffset CreatedAt);

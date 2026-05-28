@@ -47,6 +47,9 @@ export function MissionTimeline({
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
                   <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
+                    {event.category ?? "Event"}
+                  </p>
+                  <p className="mt-2 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
                     {event.type}
                   </p>
                   <h3 className="mt-2 text-lg font-semibold text-[var(--foreground)]">
