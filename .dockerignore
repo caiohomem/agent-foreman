@@ -1,0 +1,11 @@
+.git
+.agents
+.codex
+**/bin
+**/obj
+**/node_modules
+**/.next
+**/node_modules.bak
+**/tsconfig.tsbuildinfo
+.agent
+agent-foreman.yaml

@@ -62,6 +62,15 @@ public sealed class YamlAgentForemanConfigLoader : IAgentForemanConfigLoader
                 Provider = values.GetScalar("database", "provider"),
                 ConnectionString = values.GetScalar("database", "connectionString"),
             },
+            Daemon = new DaemonConfig
+            {
+                Enabled = values.GetNullableBool("daemon", "enabled") ?? true,
+                PollIntervalSeconds =
+                    values.GetNullableInt("daemon", "pollIntervalSeconds")
+                    ?? values.GetNullableInt("daemon", "pollintervalseconds")
+                    ?? 300,
+                RunOnStartup = values.GetNullableBool("daemon", "runOnStartup") ?? true,
+            },
         };
 
         var errors = Validate(config);
@@ -154,6 +163,12 @@ internal sealed class SimpleYamlValues
     {
         var value = GetScalar(section, key);
         return int.TryParse(value, out var number) ? number : null;
+    }
+
+    public bool? GetNullableBool(string section, string key)
+    {
+        var value = GetScalar(section, key);
+        return bool.TryParse(value, out var flag) ? flag : null;
     }
 
     public IReadOnlyList<string> GetList(string section, string key)

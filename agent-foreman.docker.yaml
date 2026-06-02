@@ -49,7 +49,7 @@ quota:
 
 database:
   provider: postgresql
-  connectionString: Host=localhost;Port=5432;Database=agent_foreman;Username=agent_foreman;Password=agent_foreman
+  connectionString: Host=postgres;Port=5432;Database=agent_foreman;Username=agent_foreman;Password=agent_foreman
 
 daemon:
   pollIntervalSeconds: 30

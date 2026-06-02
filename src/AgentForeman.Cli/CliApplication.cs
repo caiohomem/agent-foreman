@@ -1583,6 +1583,7 @@ public static class CliApplication
             missions = filterStatus.HasValue
                 ? missionRepository.GetByStatus(filterStatus.Value, limit)
                 : missionRepository.GetRecent(limit);
+            missions = OrderMissionsForDisplay(missions).ToList();
         }
         catch (Exception exception)
         {
@@ -1616,6 +1617,30 @@ public static class CliApplication
         }
 
         return new CommandResult(0, output.ToString(), string.Empty);
+    }
+
+    private static IEnumerable<Mission> OrderMissionsForDisplay(IEnumerable<Mission> missions)
+    {
+        return missions
+            .OrderByDescending(GetMissionSortNumber)
+            .ThenByDescending(mission => mission.UpdatedAt)
+            .ThenByDescending(mission => mission.Id, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static int GetMissionSortNumber(Mission mission)
+    {
+        if (int.TryParse(mission.ExternalWorkItemId, out var externalNumber))
+        {
+            return externalNumber;
+        }
+
+        var marker = mission.Id.LastIndexOf("-", StringComparison.Ordinal);
+        if (marker >= 0 && int.TryParse(mission.Id[(marker + 1)..], out var idNumber))
+        {
+            return idNumber;
+        }
+
+        return int.MinValue;
     }
 
     private static CommandResult RunSyncCommand(

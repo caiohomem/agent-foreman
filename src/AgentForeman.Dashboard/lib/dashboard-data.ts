@@ -33,9 +33,9 @@ export async function getDashboardOverview() {
   try {
     const [summary, missions] = await Promise.all([
       getDashboardSummary(),
-      getMissions({ limit: 50 }),
+      getMissions({ limit: 200 }),
     ]);
-    const adaptedMissions = missions.map(toMission);
+    const adaptedMissions = orderMissionsForDisplay(missions.map(toMission));
 
     return {
       summaryMetrics: toSummaryMetrics(summary),
@@ -49,13 +49,15 @@ export async function getDashboardOverview() {
       usingMockFallback: false,
     };
   } catch {
+    const fallbackMissions = orderMissionsForDisplay(mockMissions);
+
     return {
       summaryMetrics: dashboardSummary,
-      attentionQueue: mockMissions.filter(
+      attentionQueue: fallbackMissions.filter(
         (mission) => mission.status === "PausedQuota" || mission.status === "Failed",
       ),
-      reviewQueue: mockReviewQueue,
-      missions: mockMissions,
+      reviewQueue: orderMissionsForDisplay(mockReviewQueue),
+      missions: fallbackMissions,
       usingMockFallback: true,
     };
   }
@@ -63,10 +65,10 @@ export async function getDashboardOverview() {
 
 export async function getMissionList() {
   try {
-    const missions = await getMissions({ limit: 50 });
-    return missions.map(toMission);
+    const missions = await getMissions({ limit: 200 });
+    return orderMissionsForDisplay(missions.map(toMission));
   } catch {
-    return mockMissions;
+    return orderMissionsForDisplay(mockMissions);
   }
 }
 
@@ -192,6 +194,27 @@ export function toMissionSummary(summary: ApiRunSummary): MissionSummary {
     path: summary.path ?? undefined,
     createdAt: formatTimestamp(summary.createdAt),
   };
+}
+
+function orderMissionsForDisplay(missions: Mission[]): Mission[] {
+  return [...missions].sort((left, right) => {
+    const numberDiff = getMissionSortNumber(right) - getMissionSortNumber(left);
+    if (numberDiff !== 0) {
+      return numberDiff;
+    }
+
+    return left.id.localeCompare(right.id) * -1;
+  });
+}
+
+function getMissionSortNumber(mission: Mission): number {
+  const workItemNumber = Number.parseInt(mission.workItemId, 10);
+  if (Number.isFinite(workItemNumber)) {
+    return workItemNumber;
+  }
+
+  const match = mission.id.match(/(\d+)$/);
+  return match ? Number.parseInt(match[1], 10) : Number.NEGATIVE_INFINITY;
 }
 
 function mapMissionStatus(rawStatus: string): MissionStatus {

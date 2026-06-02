@@ -163,6 +163,19 @@ public sealed class CliBranchTests
         Assert.Contains("uncommitted changes", services.Missions.Saved.Last().LastError);
     }
 
+    [Fact]
+    public void RunOnce_BranchPrepFails_MarksWorkItemAsFailed()
+    {
+        var branchPreparer = new FakeMissionBranchPreparer(succeeds: false, errorMessage: "line-ending-only changes");
+        var services = RunOnceTestServices.Valid(branchPreparer: branchPreparer);
+
+        var result = services.Execute(new[] { "run-once" });
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.True(services.WorkItems.FailedMarked);
+        Assert.Contains("line-ending-only changes", services.WorkItems.LastComment);
+    }
+
     private static void SeedPlan(string repoPath, string externalId)
     {
         var planDir = Path.Combine(repoPath, ".agent", "runs", $"issue-{externalId}");

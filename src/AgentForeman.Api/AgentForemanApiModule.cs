@@ -151,7 +151,9 @@ public sealed class MissionDashboardQueries
             ? _missionRepository.GetRecent(effectiveLimit)
             : _missionRepository.GetByStatus(status.Value, effectiveLimit);
 
-        return missions.Select(MapMission).ToList();
+        return OrderMissionsForDisplay(missions)
+            .Select(MapMission)
+            .ToList();
     }
 
     public MissionResponseDto? GetMission(string id)
@@ -183,6 +185,30 @@ public sealed class MissionDashboardQueries
         }
 
         return Math.Min(limit.Value, 200);
+    }
+
+    private static IEnumerable<Mission> OrderMissionsForDisplay(IEnumerable<Mission> missions)
+    {
+        return missions
+            .OrderByDescending(GetMissionSortNumber)
+            .ThenByDescending(mission => mission.UpdatedAt)
+            .ThenByDescending(mission => mission.Id, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static int GetMissionSortNumber(Mission mission)
+    {
+        if (int.TryParse(mission.ExternalWorkItemId, out var externalNumber))
+        {
+            return externalNumber;
+        }
+
+        var marker = mission.Id.LastIndexOf("-", StringComparison.Ordinal);
+        if (marker >= 0 && int.TryParse(mission.Id[(marker + 1)..], out var idNumber))
+        {
+            return idNumber;
+        }
+
+        return int.MinValue;
     }
 
     private static int Sum(IReadOnlyDictionary<MissionStatus, int> counts, IEnumerable<MissionStatus> statuses)

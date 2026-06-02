@@ -1,0 +1,59 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: agent-foreman-postgres
+    environment:
+      POSTGRES_USER: agent_foreman
+      POSTGRES_PASSWORD: agent_foreman
+      POSTGRES_DB: agent_foreman
+    ports:
+      - "5432:5432"
+    volumes:
+      - agent_foreman_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent_foreman -d agent_foreman"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: src/AgentForeman.Api/Dockerfile
+    container_name: agent-foreman-backend
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      AGENT_FOREMAN_CONFIG: /app/config/agent-foreman.yaml
+    ports:
+      - "52888:8080"
+    volumes:
+      - ./agent-foreman.docker.yaml:/app/config/agent-foreman.yaml:ro
+      - /home/caioh/elevator-ads-mvp:/home/caioh/elevator-ads-mvp
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: src/AgentForeman.Dashboard/Dockerfile
+      args:
+        AGENT_FOREMAN_API_BASE_URL: http://backend:8080
+    container_name: agent-foreman-frontend
+    environment:
+      NODE_ENV: production
+      AGENT_FOREMAN_API_BASE_URL: http://backend:8080
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  agent_foreman_postgres_data:
+    external: true
+    name: 399d6fff46227d256f8f88e667743ff4fb52ae69cfbc51b2ebcf3daed951823e

@@ -196,6 +196,22 @@ public sealed class CliResumeTests
     }
 
     [Fact]
+    public void ResumeBranchPrepFailureMarksWorkItemAsFailed()
+    {
+        var mission = MakeMission("42", MissionStatus.PlanReady,
+            planPath: "/workspace/project/.agent/runs/issue-42/plan.md");
+        var services = ResumeTestServices.Valid(
+            mission: mission,
+            branchPreparer: new FakeMissionBranchPreparer(succeeds: false, errorMessage: "line-ending-only changes"));
+
+        var result = services.Execute(new[] { "resume", "42" });
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.True(services.WorkItems.FailedMarked);
+        Assert.Contains("line-ending-only changes", services.WorkItems.LastComment);
+    }
+
+    [Fact]
     public void ResumeHandlesQuotaPauseAgain()
     {
         var mission = MakeMission("42", MissionStatus.PlanReady,

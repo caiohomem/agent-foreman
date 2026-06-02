@@ -216,6 +216,7 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
             _missionRepository.Save(mission);
             await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.PlanningFailed, MissionEventLevel.Error, $"Planning failed: {ex.Message}", cancellationToken);
             await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionFailed, MissionEventLevel.Error, ex.Message, cancellationToken);
+            await TryMarkAsFailedAsync(item, ex.Message, cancellationToken);
             await TryGenerateSummariesAsync(mission, item, repoPath, outputDirectory, [RunSummaryType.FailureSummary, RunSummaryType.ResumeContext], cancellationToken);
             return FailureResult(item, MissionStatus.Failed, ex.Message);
         }
@@ -251,6 +252,7 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
             _missionRepository.Save(mission);
             await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.PlanningFailed, MissionEventLevel.Error, planResult.ErrorMessage ?? "Planning failed.", cancellationToken);
             await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionFailed, MissionEventLevel.Error, planResult.ErrorMessage ?? "Planning failed.", cancellationToken);
+            await TryMarkAsFailedAsync(item, planResult.ErrorMessage ?? "Planning failed.", cancellationToken);
             await TryGenerateSummariesAsync(mission, item, repoPath, outputDirectory, [RunSummaryType.FailureSummary, RunSummaryType.ResumeContext], cancellationToken);
             return FailureResult(item, MissionStatus.Failed, planResult.ErrorMessage ?? "Planning failed.");
         }
@@ -275,6 +277,7 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
             _missionRepository.Save(mission);
             await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.ExecutionFailed, MissionEventLevel.Error, branchPrepResult.ErrorMessage ?? "Branch preparation failed.", cancellationToken);
             await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionFailed, MissionEventLevel.Error, branchPrepResult.ErrorMessage ?? "Branch preparation failed.", cancellationToken);
+            await TryMarkAsFailedAsync(item, branchPrepResult.ErrorMessage ?? "Branch preparation failed.", cancellationToken);
             await TryGenerateSummariesAsync(mission, item, repoPath, outputDirectory, [RunSummaryType.FailureSummary, RunSummaryType.ResumeContext], cancellationToken);
             return FailureResult(item, MissionStatus.Failed, branchPrepResult.ErrorMessage ?? "Branch preparation failed.");
         }
@@ -311,6 +314,7 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
             _missionRepository.Save(mission);
             await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.ExecutionFailed, MissionEventLevel.Error, $"Execution failed: {ex.Message}", cancellationToken);
             await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionFailed, MissionEventLevel.Error, ex.Message, cancellationToken);
+            await TryMarkAsFailedAsync(item, ex.Message, cancellationToken);
             await TryGenerateSummariesAsync(mission, item, repoPath, outputDirectory, [RunSummaryType.FailureSummary, RunSummaryType.ResumeContext], cancellationToken);
             return FailureResult(item, MissionStatus.Failed, ex.Message);
         }
@@ -338,6 +342,7 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
             _missionRepository.Save(mission);
             await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.ExecutionFailed, MissionEventLevel.Error, codingResult.ErrorMessage ?? "Execution failed.", cancellationToken);
             await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionFailed, MissionEventLevel.Error, codingResult.ErrorMessage ?? "Execution failed.", cancellationToken);
+            await TryMarkAsFailedAsync(item, codingResult.ErrorMessage ?? "Execution failed.", cancellationToken);
             await TryGenerateSummariesAsync(mission, item, repoPath, outputDirectory, [RunSummaryType.FailureSummary, RunSummaryType.ResumeContext], cancellationToken);
             return FailureResult(item, MissionStatus.Failed, codingResult.ErrorMessage ?? "Execution failed.");
         }
@@ -356,6 +361,7 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
             _missionRepository.Save(mission);
             await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.VerificationFailed, MissionEventLevel.Error, errorMessage, cancellationToken);
             await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionFailed, MissionEventLevel.Error, errorMessage, cancellationToken);
+            await TryMarkAsFailedAsync(item, errorMessage, cancellationToken);
             await TryGenerateSummariesAsync(mission, item, repoPath, outputDirectory, [RunSummaryType.FailureSummary, RunSummaryType.ResumeContext], cancellationToken);
             return FailureResult(item, MissionStatus.Failed, errorMessage);
         }
@@ -373,6 +379,7 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
             _missionRepository.Save(mission);
             await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.VerificationFailed, MissionEventLevel.Error, $"Tests failed: {ex.Message}", cancellationToken);
             await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionFailed, MissionEventLevel.Error, ex.Message, cancellationToken);
+            await TryMarkAsFailedAsync(item, ex.Message, cancellationToken);
             await TryGenerateSummariesAsync(mission, item, repoPath, outputDirectory, [RunSummaryType.FailureSummary, RunSummaryType.ResumeContext], cancellationToken);
             return FailureResult(item, MissionStatus.TestsFailed, ex.Message);
         }
@@ -383,6 +390,7 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
             _missionRepository.Save(mission);
             await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.VerificationFailed, MissionEventLevel.Error, testResult.ErrorMessage ?? "Tests failed.", cancellationToken);
             await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionFailed, MissionEventLevel.Error, testResult.ErrorMessage ?? "Tests failed.", cancellationToken);
+            await TryMarkAsFailedAsync(item, testResult.ErrorMessage ?? "Tests failed.", cancellationToken);
             await TryGenerateSummariesAsync(mission, item, repoPath, outputDirectory, [RunSummaryType.FailureSummary, RunSummaryType.ResumeContext], cancellationToken);
             return FailureResult(item, MissionStatus.TestsFailed, testResult.ErrorMessage ?? "Tests failed.");
         }
@@ -404,6 +412,7 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
         {
             mission = mission with { Status = MissionStatus.Failed, LastError = "Nothing to commit.", UpdatedAt = DateTimeOffset.UtcNow };
             _missionRepository.Save(mission);
+            await TryMarkAsFailedAsync(item, "Nothing to commit.", cancellationToken);
             await TryGenerateSummariesAsync(mission, item, repoPath, outputDirectory, [RunSummaryType.FailureSummary, RunSummaryType.ResumeContext], cancellationToken, successDiff);
             return FailureResult(item, MissionStatus.Failed, "Nothing to commit.");
         }
@@ -419,6 +428,7 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
             _missionRepository.Save(mission);
             await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.SubmitFailed, MissionEventLevel.Error, $"Push failed: {ex.Message}", cancellationToken);
             await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionFailed, MissionEventLevel.Error, $"Push failed: {ex.Message}", cancellationToken);
+            await TryMarkAsFailedAsync(item, $"Push failed: {ex.Message}", cancellationToken);
             await TryGenerateSummariesAsync(mission, item, repoPath, outputDirectory, [RunSummaryType.FailureSummary, RunSummaryType.ResumeContext], cancellationToken, successDiff);
             return FailureResult(item, MissionStatus.Failed, $"Push failed: {ex.Message}");
         }
@@ -446,6 +456,7 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
             _missionRepository.Save(mission);
             await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.SubmitFailed, MissionEventLevel.Error, $"PR creation failed: {ex.Message}", cancellationToken);
             await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionFailed, MissionEventLevel.Error, $"PR creation failed: {ex.Message}", cancellationToken);
+            await TryMarkAsFailedAsync(item, $"PR creation failed: {ex.Message}", cancellationToken);
             await TryGenerateSummariesAsync(mission, item, repoPath, outputDirectory, [RunSummaryType.FailureSummary, RunSummaryType.ResumeContext], cancellationToken, successDiff);
             return FailureResult(item, MissionStatus.Failed, $"PR creation failed: {ex.Message}");
         }
@@ -456,6 +467,7 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
             _missionRepository.Save(mission);
             await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.SubmitFailed, MissionEventLevel.Error, $"PR creation failed: {prResult.ErrorMessage}", cancellationToken);
             await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.MissionFailed, MissionEventLevel.Error, $"PR creation failed: {prResult.ErrorMessage}", cancellationToken);
+            await TryMarkAsFailedAsync(item, $"PR creation failed: {prResult.ErrorMessage}", cancellationToken);
             await TryGenerateSummariesAsync(mission, item, repoPath, outputDirectory, [RunSummaryType.FailureSummary, RunSummaryType.ResumeContext], cancellationToken, successDiff);
             return FailureResult(item, MissionStatus.Failed, $"PR creation failed: {prResult.ErrorMessage}");
         }
@@ -569,6 +581,7 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
             {
                 mission = mission with { Status = MissionStatus.Failed, LastError = resumeBranchPrepResult.ErrorMessage, UpdatedAt = DateTimeOffset.UtcNow };
                 _missionRepository.Save(mission);
+                await TryMarkAsFailedAsync(item, resumeBranchPrepResult.ErrorMessage ?? "Branch preparation failed.", cancellationToken);
                 await TryGenerateSummariesAsync(mission, item, repoPath, outputDirectory, [RunSummaryType.FailureSummary, RunSummaryType.ResumeContext], cancellationToken);
                 return ResumeFailureResult(MissionStatus.Failed, resumeBranchPrepResult.ErrorMessage ?? "Branch preparation failed.");
             }
@@ -790,6 +803,12 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
     private async Task TryMarkAsPausedAsync(WorkItem item, string reason, DateTimeOffset retryAfter, CancellationToken cancellationToken)
     {
         try { await _workItemProvider.MarkAsPausedAsync(item, reason, retryAfter, cancellationToken); }
+        catch { }
+    }
+
+    private async Task TryMarkAsFailedAsync(WorkItem item, string reason, CancellationToken cancellationToken)
+    {
+        try { await _workItemProvider.MarkAsFailedAsync(item, reason, cancellationToken); }
         catch { }
     }
 

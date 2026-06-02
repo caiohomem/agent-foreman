@@ -169,7 +169,7 @@ Runs one complete mission for the next ready and unblocked work item: plan, exec
 
 `daemon [--once] [--interval <seconds>] [--config <path>]`
 
-Polls for ready work items and runs mission ticks. It creates `.agent/agent-foreman.lock` in the configured repo to prevent concurrent daemon instances. `--once` performs one tick and exits.
+Polls for ready work items and runs mission ticks. Each tick processes at most one mission or one eligible resume, then waits for the poll interval before checking again. It creates `.agent/agent-foreman.lock` in the configured repo to prevent concurrent daemon instances. `--once` performs one tick and exits.
 
 `status [--all] [--status <MissionStatus>] [--config <path>]`
 
@@ -318,6 +318,24 @@ The dashboard is read-only. It shows:
 - Generated logs and document placeholders.
 - Saved run summaries.
 - Read-only system status cards.
+
+## Docker Compose
+
+Run the API, dashboard, and PostgreSQL together:
+
+```bash
+docker compose up -d --build
+```
+
+The Compose setup uses `agent-foreman.docker.yaml`, with `repoPath` set to `/home/caioh/elevator-ads-mvp` for the WSL home-directory layout. It also reuses the existing PostgreSQL data volume from the previous `agent-foreman-postgres` container.
+
+Services are exposed on:
+
+```text
+Dashboard: http://localhost:3000
+API:       http://localhost:52888
+Postgres:  localhost:5432
+```
 
 ## Development
 

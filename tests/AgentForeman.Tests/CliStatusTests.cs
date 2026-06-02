@@ -143,6 +143,46 @@ public sealed class CliStatusTests
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("Completed", result.Output);
     }
+
+    [Fact]
+    public void StatusOrdersMissionsByExternalWorkItemIdDescending()
+    {
+        var missions = new FakeMissionRepository();
+        missions.Save(new Mission(
+            "github-28",
+            "28",
+            "GitHub",
+            "Older numbered mission",
+            MissionStatus.Failed,
+            Branch: null,
+            PlanPath: null,
+            PullRequestUrl: null,
+            RetryAfter: null,
+            LastError: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            UpdatedAt: DateTimeOffset.UtcNow));
+        missions.Save(new Mission(
+            "github-32",
+            "32",
+            "GitHub",
+            "Newer numbered mission",
+            MissionStatus.New,
+            Branch: null,
+            PlanPath: null,
+            PullRequestUrl: null,
+            RetryAfter: null,
+            LastError: null,
+            CreatedAt: DateTimeOffset.UtcNow.AddMinutes(-10),
+            UpdatedAt: DateTimeOffset.UtcNow.AddMinutes(-10)));
+
+        var services = StatusTestServices.Valid(missions: missions);
+
+        var result = services.Execute(new[] { "status" });
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.True(result.Output.IndexOf("github-32", StringComparison.Ordinal) <
+                    result.Output.IndexOf("github-28", StringComparison.Ordinal));
+    }
 }
 
 internal sealed class StatusTestServices

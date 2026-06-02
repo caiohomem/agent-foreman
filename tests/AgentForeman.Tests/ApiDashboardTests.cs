@@ -73,6 +73,24 @@ public sealed class ApiDashboardTests
     }
 
     [Fact]
+    public async Task MissionsEndpointOrdersNumericWorkItemsDescending()
+    {
+        var missions = new FakeMissionRepository();
+        SeedMission(missions, "github-28", MissionStatus.Failed, 1, externalWorkItemId: "28");
+        SeedMission(missions, "github-32", MissionStatus.New, 10, externalWorkItemId: "32");
+
+        using var client = CreateClient(missions: missions);
+
+        var response = await client.GetAsync("/api/missions");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("github-32", payload[0].GetProperty("id").GetString());
+        Assert.Equal("github-28", payload[1].GetProperty("id").GetString());
+    }
+
+    [Fact]
     public async Task MissionDetailsReturns404WhenNotFound()
     {
         using var client = CreateClient();
@@ -191,11 +209,16 @@ public sealed class ApiDashboardTests
         return app.GetTestClient();
     }
 
-    private static void SeedMission(FakeMissionRepository repository, string id, MissionStatus status, int minutesAgo)
+    private static void SeedMission(
+        FakeMissionRepository repository,
+        string id,
+        MissionStatus status,
+        int minutesAgo,
+        string? externalWorkItemId = null)
     {
         repository.Save(new Mission(
             id,
-            ExternalWorkItemId: id,
+            ExternalWorkItemId: externalWorkItemId ?? id,
             Source: "GitHub",
             Title: $"Mission {id}",
             Status: status,

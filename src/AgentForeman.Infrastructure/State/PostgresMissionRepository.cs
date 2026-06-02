@@ -99,7 +99,12 @@ public sealed class PostgresMissionRepository : IMissionRepository
             SELECT id, external_work_item_id, source, title, status, branch, plan_path, pull_request_url,
                    retry_after, last_error, created_at, updated_at, blocked_comment_posted_at
             FROM missions
-            ORDER BY updated_at DESC
+            ORDER BY
+                CASE
+                    WHEN external_work_item_id ~ '^[0-9]+$' THEN external_work_item_id::integer
+                    ELSE NULL
+                END DESC NULLS LAST,
+                updated_at DESC
             LIMIT @limit;
             """,
             connection);
@@ -116,7 +121,12 @@ public sealed class PostgresMissionRepository : IMissionRepository
                    retry_after, last_error, created_at, updated_at, blocked_comment_posted_at
             FROM missions
             WHERE status = @status
-            ORDER BY updated_at DESC
+            ORDER BY
+                CASE
+                    WHEN external_work_item_id ~ '^[0-9]+$' THEN external_work_item_id::integer
+                    ELSE NULL
+                END DESC NULLS LAST,
+                updated_at DESC
             LIMIT @limit;
             """,
             connection);

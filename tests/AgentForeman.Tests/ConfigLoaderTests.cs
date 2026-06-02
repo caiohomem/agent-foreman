@@ -28,6 +28,7 @@ public sealed class ConfigLoaderTests
         Assert.Equal(new[] { "dotnet test", "npm --prefix frontend run build" }, result.Config.Tests.Commands);
         Assert.Contains(".env.production", result.Config.Safety.ForbiddenPaths);
         Assert.Contains("too many requests", result.Config.Quota.QuotaPatterns);
+        Assert.Equal(30, result.Config.Daemon.PollIntervalSeconds);
     }
 
     [Fact]
@@ -56,6 +57,21 @@ public sealed class ConfigLoaderTests
         Assert.Contains("workItems.provider is required.", result.Errors);
         Assert.Contains("planner.command is required.", result.Errors);
         Assert.Contains("executor.command is required.", result.Errors);
+    }
+
+    [Fact]
+    public void DaemonPollIntervalSupportsLowercaseKey()
+    {
+        using var tempFile = TempConfigFile.Create(ValidConfigYaml.Replace(
+            "pollIntervalSeconds: 30",
+            "pollintervalseconds: 45"));
+        var loader = new YamlAgentForemanConfigLoader();
+
+        var result = loader.Load(tempFile.Path);
+
+        Assert.True(result.IsValid);
+        Assert.NotNull(result.Config);
+        Assert.Equal(45, result.Config.Daemon.PollIntervalSeconds);
     }
 
     internal const string ValidConfigYaml = """
@@ -111,6 +127,9 @@ public sealed class ConfigLoaderTests
         database:
           provider: postgresql
           connectionString: Host=localhost;Port=5432;Database=agent_foreman;Username=agent_foreman;Password=agent_foreman
+
+        daemon:
+          pollIntervalSeconds: 30
 
         """;
 }
