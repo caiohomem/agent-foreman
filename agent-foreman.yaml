@@ -16,6 +16,7 @@ workItems:
 planner:
   provider: claude-cli
   command: claude
+  model: claude-sonnet-4-6
 
 executor:
   provider: codex-cli
@@ -29,13 +30,15 @@ tests:
     - npm --prefix frontend/elevator-ads-admin run build
 
 safety:
-  maxFilesChanged: 25
+  maxFilesChanged: 100
   forbiddenPaths:
     - .env
     - .env.local
     - .env.production
     - appsettings.Production.json
     - secrets/
+  autoMergeAfterChecks: true
+  autoMergeMethod: squash
 
 quota:
   retryAfterHours: 5

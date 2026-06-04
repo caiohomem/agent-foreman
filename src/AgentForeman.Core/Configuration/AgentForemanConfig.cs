@@ -36,6 +36,7 @@ public sealed class PlannerConfig
 {
     public string Provider { get; init; } = string.Empty;
     public string Command { get; init; } = string.Empty;
+    public string Model { get; init; } = string.Empty;
 }
 
 public sealed class ExecutorConfig
@@ -44,6 +45,7 @@ public sealed class ExecutorConfig
     public string Command { get; init; } = string.Empty;
     public string Sandbox { get; init; } = string.Empty;
     public string Approval { get; init; } = string.Empty;
+    public string Model { get; init; } = string.Empty;
 }
 
 public sealed class TestsConfig
@@ -55,6 +57,8 @@ public sealed class SafetyConfig
 {
     public int? MaxFilesChanged { get; init; }
     public IReadOnlyList<string> ForbiddenPaths { get; init; } = Array.Empty<string>();
+    public bool AutoMergeAfterChecks { get; init; } = false;
+    public string AutoMergeMethod { get; init; } = "squash";
 }
 
 public sealed class QuotaConfig

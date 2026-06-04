@@ -381,14 +381,21 @@ internal sealed class FakePullRequestProvider : IPullRequestProvider
 {
     private readonly bool _succeeds;
     private readonly string _prUrl;
+    private readonly bool _autoMergeSucceeds;
 
-    public FakePullRequestProvider(bool succeeds = true, string prUrl = "https://github.com/caio/elevator-ads-mvp/pull/10")
+    public FakePullRequestProvider(
+        bool succeeds = true,
+        string prUrl = "https://github.com/caio/elevator-ads-mvp/pull/10",
+        bool autoMergeSucceeds = true)
     {
         _succeeds = succeeds;
         _prUrl = prUrl;
+        _autoMergeSucceeds = autoMergeSucceeds;
     }
 
     public PullRequestRequest? LastRequest { get; private set; }
+    public PullRequestAutoMergeRequest? LastAutoMergeRequest { get; private set; }
+    public int AutoMergeCallCount { get; private set; }
 
     public Task<PullRequestResult> CreateAsync(PullRequestRequest request, CancellationToken cancellationToken)
     {
@@ -396,5 +403,14 @@ internal sealed class FakePullRequestProvider : IPullRequestProvider
         return Task.FromResult(_succeeds
             ? new PullRequestResult(true, _prUrl, _prUrl, string.Empty, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null)
             : new PullRequestResult(false, null, string.Empty, "pr creation failed", 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "pr creation failed"));
+    }
+
+    public Task<PullRequestResult> EnableAutoMergeAsync(PullRequestAutoMergeRequest request, CancellationToken cancellationToken)
+    {
+        LastAutoMergeRequest = request;
+        AutoMergeCallCount++;
+        return Task.FromResult(_autoMergeSucceeds
+            ? new PullRequestResult(true, request.PullRequestUrl, "auto-merge enabled", string.Empty, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null)
+            : new PullRequestResult(false, request.PullRequestUrl, string.Empty, "auto-merge failed", 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "auto-merge failed"));
     }
 }

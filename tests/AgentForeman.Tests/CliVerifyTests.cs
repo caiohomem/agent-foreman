@@ -50,7 +50,7 @@ public sealed class CliVerifyTests
         var services = VerifyTestServices.Valid(workspace.Path,
             safetyResult: SafetyCheckResult.Fail(new[]
             {
-                new SafetyViolation("Too many changed files: 30 (max 25)."),
+                new SafetyViolation("Too many changed files: 30 (max 100)."),
             }));
 
         var result = services.Execute(new[] { "verify", "42" });
@@ -149,7 +149,7 @@ internal sealed class VerifyTestServices
             },
             Safety = new SafetyConfig
             {
-                MaxFilesChanged = 25,
+                MaxFilesChanged = 100,
                 ForbiddenPaths = new[] { ".env", "secrets/" },
             },
             Database = new DatabaseConfig

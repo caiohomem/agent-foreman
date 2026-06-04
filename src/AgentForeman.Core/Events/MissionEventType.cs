@@ -26,4 +26,6 @@ public enum MissionEventType
     CommandStarted,
     CommandCompleted,
     CommandFailed,
+    AutoMergeEnabled,
+    AutoMergeFailed,
 }

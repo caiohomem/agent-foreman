@@ -3,11 +3,13 @@ using AgentForeman.Core.Commands;
 
 namespace AgentForeman.Infrastructure.Coding;
 
-public sealed class CodexCliCodingAgent : ICodingAgent
+public sealed class OpencodeCliCodingAgent : ICodingAgent
 {
+    public const string DefaultModel = "opencode/minimax-m3-free";
+
     private readonly ICommandRunner _commandRunner;
 
-    public CodexCliCodingAgent(ICommandRunner commandRunner)
+    public OpencodeCliCodingAgent(ICommandRunner commandRunner)
     {
         _commandRunner = commandRunner;
     }
@@ -16,17 +18,20 @@ public sealed class CodexCliCodingAgent : ICodingAgent
     {
         Directory.CreateDirectory(request.OutputDirectory);
 
-        var logPath = Path.Combine(request.OutputDirectory, "codex-exec.log");
+        var logPath = Path.Combine(request.OutputDirectory, "opencode-exec.log");
         var prompt = CodingPromptBuilder.Build(request);
+        var model = string.IsNullOrWhiteSpace(request.Config.Executor.Model)
+            ? DefaultModel
+            : request.Config.Executor.Model;
+
         var arguments = new List<string>
         {
-            "--ask-for-approval",
-            request.Config.Executor.Approval,
-            "exec",
-            "--sandbox",
-            request.Config.Executor.Sandbox,
-            "--cd",
+            "run",
+            "--model",
+            model,
+            "--dir",
             request.RepoPath,
+            "--dangerously-skip-permissions",
             prompt,
         };
 
@@ -47,8 +52,8 @@ public sealed class CodexCliCodingAgent : ICodingAgent
         }
 
         var error = quotaDetected
-            ? "Codex CLI reported a quota or rate limit."
-            : (string.IsNullOrWhiteSpace(result.StderrText) ? "Codex executor failed." : result.StderrText.Trim());
+            ? "Opencode CLI reported a quota or rate limit."
+            : (string.IsNullOrWhiteSpace(result.StderrText) ? "Opencode executor failed." : result.StderrText.Trim());
 
         return CodingResult.Failure(
             logPath,

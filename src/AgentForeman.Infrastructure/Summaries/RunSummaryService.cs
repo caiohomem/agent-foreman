@@ -83,6 +83,7 @@ public sealed class RunSummaryService
             request.Mission.Id,
             request.Mission.ExternalWorkItemId,
             request.OutputDirectory,
+            request.RepoPath,
             request.IssueTitle,
             request.IssueBody,
             planContent,

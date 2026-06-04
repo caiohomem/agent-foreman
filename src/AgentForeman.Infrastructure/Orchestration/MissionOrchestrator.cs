@@ -63,6 +63,7 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
         var repoPath = config.Project.RepoPath;
 
         var readyItems = await _workItemProvider.GetReadyItemsAsync(cancellationToken);
+        readyItems = OrderReadyItems(readyItems);
         if (readyItems.Count == 0)
         {
             return new RunOnceResult(
@@ -485,6 +486,21 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
 
         await TryMarkAsReviewAsync(item, prResult.PullRequestUrl!, cancellationToken);
         await TryGenerateSummariesAsync(mission, item, repoPath, outputDirectory, [RunSummaryType.SuccessSummary], cancellationToken, successDiff);
+
+        if (config.Safety.AutoMergeAfterChecks)
+        {
+            var autoMergeResult = await _pullRequestProvider.EnableAutoMergeAsync(
+                new PullRequestAutoMergeRequest(item.Repository, prResult.PullRequestUrl!, config.Safety.AutoMergeMethod),
+                cancellationToken);
+            if (autoMergeResult.Success)
+            {
+                await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.AutoMergeEnabled, MissionEventLevel.Info, $"Auto-merge enabled ({config.Safety.AutoMergeMethod}).", cancellationToken);
+            }
+            else
+            {
+                await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.AutoMergeFailed, MissionEventLevel.Warning, $"Auto-merge failed: {autoMergeResult.ErrorMessage}", cancellationToken);
+            }
+        }
 
         return new RunOnceResult(
             Success: true,
@@ -975,5 +991,24 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
         {
             return null;
         }
+    }
+
+    internal static IReadOnlyList<WorkItem> OrderReadyItems(IReadOnlyList<WorkItem> items)
+    {
+        return items
+            .OrderBy(item => ParseExternalId(item.ExternalId), Comparer<int?>.Create((a, b) =>
+            {
+                if (a is null && b is null) return 0;
+                if (a is null) return 1;
+                if (b is null) return -1;
+                return a.Value.CompareTo(b.Value);
+            }))
+            .ThenBy(item => item.ExternalId, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static int? ParseExternalId(string externalId)
+    {
+        return int.TryParse(externalId, out var number) ? number : null;
     }
 }

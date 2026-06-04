@@ -10,7 +10,7 @@ Implemented now:
 
 - CLI orchestration for one ready GitHub issue.
 - Claude CLI planning into `plan.md`.
-- Codex CLI execution into `codex-exec.log`.
+- Codex CLI or opencode CLI execution into `codex-exec.log` / `opencode-exec.log`.
 - Configured test execution into `tests.log`.
 - Git branch preparation, commit, push, and pull request creation.
 - PostgreSQL state store for missions, events, provider state, and run summaries.
@@ -62,6 +62,38 @@ For the API, a config path can also be provided through:
 ```bash
 AGENT_FOREMAN_CONFIG=/path/to/agent-foreman.yaml
 ```
+
+### Executor providers
+
+Set `executor.provider` to pick which coding agent runs the implementation stage:
+
+- `codex-cli` (default): invokes `codex --ask-for-approval <approval> exec --sandbox <sandbox> --cd <repo> "<prompt>"` and writes `codex-exec.log`.
+- `opencode-cli`: invokes `opencode run --model <model> --dir <repo> --dangerously-skip-permissions "<prompt>"` and writes `opencode-exec.log`. If `executor.model` is not set, it defaults to `opencode/minimax-m3-free`. The `sandbox` and `approval` fields are codex-only and ignored.
+
+### Planner model
+
+The planner and run-summary generator share the same `planner` provider (Claude CLI by default). The CLI is invoked as `claude --print <prompt>`. To pin the model, set `planner.model` in `agent-foreman.yaml`:
+
+```yaml
+planner:
+  provider: claude-cli
+  command: claude
+  model: claude-sonnet-4-6
+```
+
+This is also forwarded to `claude --model <model>` for run-summary generation, so all Claude-backed stages use the same model. Use a non-1M-context model (e.g. `claude-sonnet-4-6`) unless the account has usage credits for 1M context enabled.
+
+### Auto-merge (opt-in)
+
+By default Agent Foreman stops after creating the pull request and waits for human review. To let the agent enable GitHub auto-merge on every PR it opens (so each PR is merged automatically as soon as the repo's required checks and approvals are satisfied), set:
+
+```yaml
+safety:
+  autoMergeAfterChecks: true
+  autoMergeMethod: squash   # squash | merge | rebase
+```
+
+When enabled, the submit step calls `gh pr merge <num> --auto --<method>` right after `gh pr create`. The mission records an `AutoMergeEnabled` event on success, or `AutoMergeFailed` (warning) if GitHub refuses. Auto-merge is an explicit override of the `Never merge pull requests automatically` safety rule — keep it off unless you trust the agent's `verify` stage to catch every regression.
 
 ## CLI
 
@@ -153,7 +185,7 @@ Loads the GitHub issue, records a mission in `Planning`, invokes Claude CLI, wri
 
 `execute <workItemId> [--config <path>]`
 
-Requires an existing `plan.md`, prepares branch `agent/issue-{id}`, invokes Codex CLI, writes `codex-exec.log`, records events, and moves the mission to `CodingCompleted`. Execution failures and quota pauses generate run summaries when possible.
+Requires an existing `plan.md`, prepares branch `agent/issue-{id}`, invokes the configured executor (Codex CLI or opencode CLI), writes `codex-exec.log` or `opencode-exec.log`, records events, and moves the mission to `CodingCompleted`. Execution failures and quota pauses generate run summaries when possible.
 
 `verify <workItemId> [--config <path>]`
 
@@ -238,6 +270,7 @@ Mission run files are written under the configured project repository:
   plan.md
   claude-plan.log
   codex-exec.log
+  opencode-exec.log
   tests.log
   summary.md
   failure-summary.md

@@ -6,7 +6,9 @@ type StatusBadgeProps = {
 };
 
 const missionStyles: Record<MissionStatus, string> = {
+  New: "border-slate-300 bg-slate-100 text-slate-900",
   Planning: "border-sky-200 bg-sky-100 text-sky-900",
+  PlanReady: "border-cyan-200 bg-cyan-100 text-cyan-900",
   Coding: "border-indigo-200 bg-indigo-100 text-indigo-900",
   Testing: "border-violet-200 bg-violet-100 text-violet-900",
   PausedQuota: "border-amber-200 bg-amber-100 text-amber-900",

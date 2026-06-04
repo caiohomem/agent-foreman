@@ -8,11 +8,13 @@ public sealed class ClaudeCliRunSummaryGenerator : IRunSummaryGenerator
 {
     private readonly ICommandRunner _commandRunner;
     private readonly string _command;
+    private readonly string _model;
 
-    public ClaudeCliRunSummaryGenerator(ICommandRunner commandRunner, string command = "claude")
+    public ClaudeCliRunSummaryGenerator(ICommandRunner commandRunner, string command = "claude", string model = "")
     {
         _commandRunner = commandRunner;
         _command = command;
+        _model = model;
     }
 
     public async Task<RunSummaryResult> GenerateAsync(
@@ -22,10 +24,12 @@ public sealed class ClaudeCliRunSummaryGenerator : IRunSummaryGenerator
     {
         var promptFilePath = WritePromptFile(summaryType, request);
         var prompt = BuildPrompt(summaryType, promptFilePath);
+        var arguments = BuildArguments(prompt);
         var result = await _commandRunner.RunAsync(
             new CommandRequest(
                 _command,
-                ["--print", prompt]),
+                arguments,
+                WorkingDirectory: request.RepoPath),
             cancellationToken: cancellationToken);
 
         if (!result.Success)
@@ -37,6 +41,18 @@ public sealed class ClaudeCliRunSummaryGenerator : IRunSummaryGenerator
         }
 
         return new RunSummaryResult(summaryType, result.StdoutText);
+    }
+
+    private IReadOnlyList<string> BuildArguments(string prompt)
+    {
+        var arguments = new List<string>(capacity: 3) { "--print" };
+        if (!string.IsNullOrWhiteSpace(_model))
+        {
+            arguments.Add("--model");
+            arguments.Add(_model);
+        }
+        arguments.Add(prompt);
+        return arguments;
     }
 
     private static string BuildPrompt(RunSummaryType summaryType, string promptFilePath)

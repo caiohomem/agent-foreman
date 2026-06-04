@@ -344,6 +344,76 @@ public sealed class CliRunOnceTests
         Assert.Equal(0, result.ExitCode);
         Assert.Contains(services.Events.Events, e => e.EventType == MissionEventType.DependencyBlocked);
     }
+
+    [Fact]
+    public void RunOncePicksLowestExternalIdWhenMultipleItemsAreReady()
+    {
+        var item33 = new WorkItem(
+            "33",
+            WorkItemSource.GitHub,
+            "Issue 33",
+            "Issue body",
+            "https://github.com/caio/elevator-ads-mvp/issues/33",
+            "caio/elevator-ads-mvp",
+            new[] { new WorkItemLabel("agent-ready") },
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow);
+        var item31 = new WorkItem(
+            "31",
+            WorkItemSource.GitHub,
+            "Issue 31",
+            "Issue body",
+            "https://github.com/caio/elevator-ads-mvp/issues/31",
+            "caio/elevator-ads-mvp",
+            new[] { new WorkItemLabel("agent-ready") },
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow);
+        var item100 = new WorkItem(
+            "100",
+            WorkItemSource.GitHub,
+            "Issue 100",
+            "Issue body",
+            "https://github.com/caio/elevator-ads-mvp/issues/100",
+            "caio/elevator-ads-mvp",
+            new[] { new WorkItemLabel("agent-ready") },
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow);
+
+        var services = RunOnceTestServices.Valid(readyItems: new[] { item33, item100, item31 });
+
+        var result = services.Execute(new[] { "run-once" });
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal("31", services.WorkItems.WorkingMarkedFor);
+    }
+
+    [Fact]
+    public void RunOnceEnablesAutoMergeWhenConfigured()
+    {
+        var services = RunOnceTestServices.Valid(autoMerge: true, autoMergeMethod: "squash");
+
+        var result = services.Execute(new[] { "run-once" });
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(1, services.PullRequests.AutoMergeCallCount);
+        Assert.NotNull(services.PullRequests.LastAutoMergeRequest);
+        Assert.Equal("squash", services.PullRequests.LastAutoMergeRequest!.Method);
+        Assert.Equal("https://github.com/caio/elevator-ads-mvp/pull/10",
+            services.PullRequests.LastAutoMergeRequest.PullRequestUrl);
+        Assert.Contains(services.Events.Events, e => e.EventType == MissionEventType.AutoMergeEnabled);
+    }
+
+    [Fact]
+    public void RunOnceDoesNotEnableAutoMergeWhenDisabled()
+    {
+        var services = RunOnceTestServices.Valid(autoMerge: false);
+
+        var result = services.Execute(new[] { "run-once" });
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(0, services.PullRequests.AutoMergeCallCount);
+        Assert.DoesNotContain(services.Events.Events, e => e.EventType == MissionEventType.AutoMergeEnabled);
+    }
 }
 
 internal sealed class RunOnceTestServices
@@ -402,7 +472,9 @@ internal sealed class RunOnceTestServices
         IMissionBranchPreparer? branchPreparer = null,
         IReadOnlyList<WorkItem>? readyItems = null,
         IWorkItemDependencyResolver? dependencyResolver = null,
-        FakeMissionRepository? missions = null)
+        FakeMissionRepository? missions = null,
+        bool autoMerge = false,
+        string autoMergeMethod = "squash")
     {
         var config = new AgentForemanConfig
         {
@@ -438,8 +510,10 @@ internal sealed class RunOnceTestServices
             },
             Safety = new SafetyConfig
             {
-                MaxFilesChanged = 25,
+                MaxFilesChanged = 100,
                 ForbiddenPaths = new[] { ".env", "secrets/" },
+                AutoMergeAfterChecks = autoMerge,
+                AutoMergeMethod = autoMergeMethod,
             },
             Quota = new QuotaConfig
             {

@@ -87,6 +87,7 @@ public sealed class RunSummaryTests
                 "github-42",
                 "42",
                 outputDirectory,
+                workspace.Path,
                 "Fix pacing",
                 "Issue body",
                 "# Plan",
@@ -99,9 +100,45 @@ public sealed class RunSummaryTests
             CancellationToken.None);
 
         Assert.NotNull(runner.LastRequest);
-        Assert.Contains(outputDirectory, runner.LastRequest!.Arguments[1]);
+        Assert.Equal(workspace.Path, runner.LastRequest!.WorkingDirectory);
+        Assert.Contains(outputDirectory, runner.LastRequest.Arguments[1]);
         Assert.DoesNotContain("/tmp/agent-foreman-run-summaries", runner.LastRequest.Arguments[1], StringComparison.Ordinal);
         Assert.True(File.Exists(Path.Combine(outputDirectory, "summary-context-successsummary.md")));
+    }
+
+    [Fact]
+    public async Task ClaudeSummaryGeneratorRunsFromRepoPathSoContextFileIsReadable()
+    {
+        using var workspace = TemporaryDirectory.Create();
+        Directory.CreateDirectory(workspace.Path);
+        var outputDirectory = Path.Combine(workspace.Path, ".agent", "runs", "issue-42");
+        Directory.CreateDirectory(outputDirectory);
+
+        var runner = new RecordingCommandRunner("## Summary");
+        var generator = new ClaudeCliRunSummaryGenerator(runner, "claude");
+
+        await generator.GenerateAsync(
+            RunSummaryType.SuccessSummary,
+            new RunSummaryRequest(
+                "github-42",
+                "42",
+                outputDirectory,
+                workspace.Path,
+                "Fix pacing",
+                "Issue body",
+                "# Plan",
+                "codex log",
+                "tests log",
+                Array.Empty<RunSummaryArtifact>(),
+                "diff --git a/app.cs b/app.cs",
+                "https://github.com/example/repo/pull/42",
+                MissionStatus.PullRequestCreated.ToString()),
+            CancellationToken.None);
+
+        Assert.NotNull(runner.LastRequest);
+        Assert.Equal(workspace.Path, runner.LastRequest!.WorkingDirectory);
+        Assert.Equal("claude", runner.LastRequest.Executable);
+        Assert.Equal("--print", runner.LastRequest.Arguments[0]);
     }
 
     [Fact]

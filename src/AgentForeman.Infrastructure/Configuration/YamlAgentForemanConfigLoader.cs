@@ -1,4 +1,5 @@
 using AgentForeman.Core.Configuration;
+using AgentForeman.Infrastructure.Coding;
 
 namespace AgentForeman.Infrastructure.Configuration;
 
@@ -35,6 +36,7 @@ public sealed class YamlAgentForemanConfigLoader : IAgentForemanConfigLoader
             {
                 Provider = values.GetScalar("planner", "provider"),
                 Command = values.GetScalar("planner", "command"),
+                Model = values.GetScalar("planner", "model"),
             },
             Executor = new ExecutorConfig
             {
@@ -42,6 +44,7 @@ public sealed class YamlAgentForemanConfigLoader : IAgentForemanConfigLoader
                 Command = values.GetScalar("executor", "command"),
                 Sandbox = values.GetScalar("executor", "sandbox"),
                 Approval = values.GetScalar("executor", "approval"),
+                Model = values.GetScalar("executor", "model"),
             },
             Tests = new TestsConfig
             {
@@ -51,6 +54,12 @@ public sealed class YamlAgentForemanConfigLoader : IAgentForemanConfigLoader
             {
                 MaxFilesChanged = values.GetNullableInt("safety", "maxFilesChanged"),
                 ForbiddenPaths = values.GetList("safety", "forbiddenPaths"),
+                AutoMergeAfterChecks =
+                    values.GetNullableBool("safety", "autoMergeAfterChecks") ?? false,
+                AutoMergeMethod =
+                    string.IsNullOrWhiteSpace(values.GetScalar("safety", "autoMergeMethod"))
+                        ? "squash"
+                        : values.GetScalar("safety", "autoMergeMethod"),
             },
             Quota = new QuotaConfig
             {
@@ -98,6 +107,12 @@ public sealed class YamlAgentForemanConfigLoader : IAgentForemanConfigLoader
             && !string.Equals(config.Database.Provider, "postgresql", StringComparison.OrdinalIgnoreCase))
         {
             errors.Add("database.provider must be postgresql.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(config.Executor.Provider)
+            && !CodingAgentFactory.IsSupported(config.Executor.Provider))
+        {
+            errors.Add($"executor.provider must be one of: {string.Join(", ", CodingAgentFactory.SupportedProviders)}.");
         }
 
         return errors;

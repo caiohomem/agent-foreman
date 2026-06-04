@@ -340,7 +340,7 @@ internal sealed class ResumeTestServices
             },
             Safety = new SafetyConfig
             {
-                MaxFilesChanged = 25,
+                MaxFilesChanged = 100,
                 ForbiddenPaths = new[] { ".env", "secrets/" },
             },
             Quota = new QuotaConfig

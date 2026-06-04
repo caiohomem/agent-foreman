@@ -4,6 +4,7 @@ public sealed record RunSummaryRequest(
     string MissionId,
     string? ExternalWorkItemId,
     string RunDirectory,
+    string RepoPath,
     string IssueTitle,
     string IssueBody,
     string? PlanContent,

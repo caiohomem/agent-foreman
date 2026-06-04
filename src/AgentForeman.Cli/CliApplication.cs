@@ -864,13 +864,13 @@ public static class CliApplication
             return new CommandResult(1, string.Empty, $"Unsupported work item provider: {config.WorkItems.Provider}{Environment.NewLine}");
         }
 
-        if (!string.Equals(config.Executor.Provider, "codex-cli", StringComparison.OrdinalIgnoreCase))
+        if (!CodingAgentFactory.IsSupported(config.Executor.Provider))
         {
             return new CommandResult(1, string.Empty, $"Unsupported executor provider: {config.Executor.Provider}{Environment.NewLine}");
         }
 
         workItemProvider ??= new GitHubWorkItemProvider(config, commandRunner);
-        codingAgent ??= new CodexCliCodingAgent(commandRunner);
+        codingAgent ??= CodingAgentFactory.Create(config, commandRunner);
         missionRepository ??= new PostgresMissionRepository(config.Database.ConnectionString);
         missionEventRecorder ??= new PostgresMissionEventRecorder(config.Database.ConnectionString);
         var runSummaryService = CreateRunSummaryService(config, commandRunner, gitRepository, runSummaryRepository, runSummaryGenerator);
@@ -1431,7 +1431,7 @@ public static class CliApplication
 
         workItemProvider ??= new GitHubWorkItemProvider(config, commandRunner);
         planningAgent ??= new ClaudeCliPlanningAgent(commandRunner);
-        codingAgent ??= new CodexCliCodingAgent(commandRunner);
+        codingAgent ??= CodingAgentFactory.Create(config, commandRunner);
         testRunner ??= new ConfiguredCommandTestRunner(commandRunner);
         safetyChecker ??= new GitSafetyChecker(gitRepository);
         pullRequestProvider ??= new GitHubPullRequestProvider(commandRunner);
@@ -1832,7 +1832,7 @@ public static class CliApplication
 
         workItemProvider ??= new GitHubWorkItemProvider(config, commandRunner);
         planningAgent ??= new ClaudeCliPlanningAgent(commandRunner);
-        codingAgent ??= new CodexCliCodingAgent(commandRunner);
+        codingAgent ??= CodingAgentFactory.Create(config, commandRunner);
         testRunner ??= new ConfiguredCommandTestRunner(commandRunner);
         safetyChecker ??= new GitSafetyChecker(gitRepository);
         pullRequestProvider ??= new GitHubPullRequestProvider(commandRunner);
@@ -1851,6 +1851,16 @@ public static class CliApplication
         output.AppendLine("Agent Foreman daemon started.");
         output.AppendLine($"Poll interval: {pollInterval} seconds.");
         output.AppendLine();
+
+        void Emit(string line)
+        {
+            output.AppendLine(line);
+            Console.WriteLine(line);
+        }
+
+        Emit("Agent Foreman daemon started.");
+        Emit($"Poll interval: {pollInterval} seconds.");
+        Emit(string.Empty);
 
         var cts = new CancellationTokenSource();
         ConsoleCancelEventHandler cancelHandler = (_, e) =>
@@ -1883,14 +1893,14 @@ public static class CliApplication
             while (!cts.Token.IsCancellationRequested)
             {
                 var timestamp = DateTimeOffset.UtcNow.ToString("O");
-                output.AppendLine($"[{timestamp}] Checking for work...");
+                Emit($"[{timestamp}] Checking for work...");
 
                 DaemonTickResult tickResult;
                 try
                 {
                     tickResult = orchestrator.DaemonTickAsync(
                         new DaemonTickRequest(config),
-                        msg => output.AppendLine(msg),
+                        msg => Emit(msg),
                         cts.Token).GetAwaiter().GetResult();
                 }
                 catch (OperationCanceledException)
@@ -1899,33 +1909,33 @@ public static class CliApplication
                 }
                 catch (Exception ex)
                 {
-                    output.AppendLine($"Tick error: {ex.Message}");
+                    Emit($"Tick error: {ex.Message}");
                     if (runOnce) break;
                     goto sleep;
                 }
 
                 if (tickResult.ActiveMissionSkipped)
                 {
-                    output.AppendLine(tickResult.Message ?? "Active mission in progress. Skipping.");
+                    Emit(tickResult.Message ?? "Active mission in progress. Skipping.");
                 }
                 else if (tickResult.NoReadyWork)
                 {
-                    output.AppendLine("No ready work items found.");
+                    Emit("No ready work items found.");
                 }
                 else if (tickResult.PullRequestUrl is not null)
                 {
-                    output.AppendLine("Run completed successfully.");
-                    output.AppendLine($"Pull request: {tickResult.PullRequestUrl}");
+                    Emit("Run completed successfully.");
+                    Emit($"Pull request: {tickResult.PullRequestUrl}");
                 }
                 else if (tickResult.Message is not null)
                 {
-                    output.AppendLine(tickResult.Message);
+                    Emit(tickResult.Message);
                 }
 
                 if (runOnce) break;
 
                 sleep:
-                output.AppendLine($"Sleeping for {pollInterval} seconds.");
+                Emit($"Sleeping for {pollInterval} seconds.");
 
                 try
                 {
@@ -2103,7 +2113,7 @@ public static class CliApplication
 
         workItemProvider ??= new GitHubWorkItemProvider(config, commandRunner);
         planningAgent ??= new ClaudeCliPlanningAgent(commandRunner);
-        codingAgent ??= new CodexCliCodingAgent(commandRunner);
+        codingAgent ??= CodingAgentFactory.Create(config, commandRunner);
         testRunner ??= new ConfiguredCommandTestRunner(commandRunner);
         safetyChecker ??= new GitSafetyChecker(gitRepository);
         pullRequestProvider ??= new GitHubPullRequestProvider(commandRunner);
@@ -2200,7 +2210,7 @@ public static class CliApplication
         IRunSummaryGenerator? generator)
     {
         repository ??= new PostgresRunSummaryRepository(config.Database.ConnectionString);
-        generator ??= new ClaudeCliRunSummaryGenerator(commandRunner, config.Planner.Command);
+        generator ??= new ClaudeCliRunSummaryGenerator(commandRunner, config.Planner.Command, config.Planner.Model);
         return new RunSummaryService(generator, repository, gitRepository);
     }
 

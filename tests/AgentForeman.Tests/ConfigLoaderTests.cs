@@ -21,6 +21,7 @@ public sealed class ConfigLoaderTests
         Assert.Equal("github", result.Config.WorkItems.Provider);
         Assert.Equal("claude-cli", result.Config.Planner.Provider);
         Assert.Equal("claude", result.Config.Planner.Command);
+        Assert.Equal("", result.Config.Planner.Model);
         Assert.Equal("codex-cli", result.Config.Executor.Provider);
         Assert.Equal("codex", result.Config.Executor.Command);
         Assert.Equal("agent-blocked", result.Config.WorkItems.BlockedLabel);
@@ -74,6 +75,52 @@ public sealed class ConfigLoaderTests
         Assert.Equal(45, result.Config.Daemon.PollIntervalSeconds);
     }
 
+    [Fact]
+    public void OpencodeExecutorProviderIsAccepted()
+    {
+        using var tempFile = TempConfigFile.Create(ValidConfigYaml.Replace(
+            "provider: codex-cli\n  command: codex",
+            "provider: opencode-cli\n  command: opencode\n  model: opencode/minimax-m3-free"));
+        var loader = new YamlAgentForemanConfigLoader();
+
+        var result = loader.Load(tempFile.Path);
+
+        Assert.True(result.IsValid);
+        Assert.NotNull(result.Config);
+        Assert.Equal("opencode-cli", result.Config.Executor.Provider);
+        Assert.Equal("opencode", result.Config.Executor.Command);
+        Assert.Equal("opencode/minimax-m3-free", result.Config.Executor.Model);
+    }
+
+    [Fact]
+    public void UnknownExecutorProviderIsRejected()
+    {
+        using var tempFile = TempConfigFile.Create(ValidConfigYaml.Replace(
+            "provider: codex-cli",
+            "provider: unknown-cli"));
+        var loader = new YamlAgentForemanConfigLoader();
+
+        var result = loader.Load(tempFile.Path);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Contains("executor.provider must be one of"));
+    }
+
+    [Fact]
+    public void PlannerModelIsLoaded()
+    {
+        using var tempFile = TempConfigFile.Create(ValidConfigYaml.Replace(
+            "planner:\n  provider: claude-cli\n  command: claude",
+            "planner:\n  provider: claude-cli\n  command: claude\n  model: claude-sonnet-4-6"));
+        var loader = new YamlAgentForemanConfigLoader();
+
+        var result = loader.Load(tempFile.Path);
+
+        Assert.True(result.IsValid);
+        Assert.NotNull(result.Config);
+        Assert.Equal("claude-sonnet-4-6", result.Config.Planner.Model);
+    }
+
     internal const string ValidConfigYaml = """
         project:
           name: elevator-ads-mvp
@@ -106,7 +153,7 @@ public sealed class ConfigLoaderTests
             - npm --prefix frontend run build
 
         safety:
-          maxFilesChanged: 25
+          maxFilesChanged: 100
           forbiddenPaths:
             - .env
             - .env.local

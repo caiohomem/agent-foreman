@@ -49,6 +49,49 @@ test("toMission adapts API mission details into the richer UI model", () => {
   assert.equal(mission.pullRequestUrl, "https://github.com/caioh/agent-foreman/pull/42");
 });
 
+test("toMission keeps the New status distinct from Planning", () => {
+  const mission = toMission({
+    id: "github-30",
+    externalWorkItemId: "30",
+    source: "GitHub",
+    title: "Implement proof-of-play reporting",
+    status: "New",
+    branch: null,
+    planPath: null,
+    pullRequestUrl: null,
+    retryAfter: null,
+    lastError: null,
+    createdAt: "2026-06-01T10:00:00+00:00",
+    updatedAt: "2026-06-01T10:00:00+00:00",
+    blockedCommentPostedAt: null,
+  });
+
+  assert.equal(mission.status, "New");
+  assert.equal(mission.rawStatus, "New");
+  assert.match(mission.statusNote, /no agent has picked it up/i);
+});
+
+test("toMission keeps PlanReady distinct from Planning", () => {
+  const mission = toMission({
+    id: "github-30",
+    externalWorkItemId: "30",
+    source: "GitHub",
+    title: "Implement proof-of-play reporting",
+    status: "PlanReady",
+    branch: null,
+    planPath: "/workspace/.agent/runs/issue-30/plan.md",
+    pullRequestUrl: null,
+    retryAfter: null,
+    lastError: null,
+    createdAt: "2026-06-01T10:00:00+00:00",
+    updatedAt: "2026-06-01T10:05:00+00:00",
+    blockedCommentPostedAt: null,
+  });
+
+  assert.equal(mission.status, "PlanReady");
+  assert.match(mission.statusNote, /plan has been written/i);
+});
+
 test("toMissionEvent adapts API events into timeline entries", () => {
   const event = toMissionEvent({
     id: "evt-1",

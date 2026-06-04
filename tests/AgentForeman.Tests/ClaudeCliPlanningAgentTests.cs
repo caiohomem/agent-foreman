@@ -53,7 +53,37 @@ public sealed class ClaudeCliPlanningAgentTests
         Assert.True(File.Exists(result.LogPath));
     }
 
-    private static PlanningRequest Request(string repoPath)
+    [Fact]
+    public async Task ClaudePlannerForwardsModelFlagWhenConfigured()
+    {
+        using var workspace = TemporaryDirectory.Create();
+        var runner = new RecordingCommandRunner("# Plan");
+        var agent = new ClaudeCliPlanningAgent(runner);
+        var request = Request(workspace.Path, model: "claude-sonnet-4-6");
+
+        await agent.CreatePlanAsync(request, CancellationToken.None);
+
+        Assert.NotNull(runner.LastRequest);
+        Assert.Equal(new[] { "--print", "--model", "claude-sonnet-4-6", runner.LastRequest.Arguments[3] },
+            runner.LastRequest.Arguments);
+    }
+
+    [Fact]
+    public async Task ClaudePlannerOmitsModelFlagWhenUnset()
+    {
+        using var workspace = TemporaryDirectory.Create();
+        var runner = new RecordingCommandRunner("# Plan");
+        var agent = new ClaudeCliPlanningAgent(runner);
+        var request = Request(workspace.Path, model: "");
+
+        await agent.CreatePlanAsync(request, CancellationToken.None);
+
+        Assert.NotNull(runner.LastRequest);
+        Assert.Equal(2, runner.LastRequest!.Arguments.Count);
+        Assert.Equal("--print", runner.LastRequest.Arguments[0]);
+    }
+
+    private static PlanningRequest Request(string repoPath, string model = "")
     {
         return new PlanningRequest(
             WorkItemId: "42",
@@ -70,6 +100,7 @@ public sealed class ClaudeCliPlanningAgentTests
                 {
                     Provider = "claude-cli",
                     Command = "claude",
+                    Model = model,
                 },
             });
     }

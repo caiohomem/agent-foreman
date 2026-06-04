@@ -235,19 +235,25 @@ function mapMissionStatus(rawStatus: string): MissionStatus {
     case "Coding":
     case "CodingCompleted":
       return "Coding";
-    case "New":
-    case "BranchCreated":
-    case "Planning":
     case "PlanReady":
-    default:
+      return "PlanReady";
+    case "Planning":
       return "Planning";
+    case "BranchCreated":
+    case "New":
+    default:
+      return "New";
   }
 }
 
 function createStatusNote(status: MissionStatus, mission: ApiMission): string {
   switch (status) {
+    case "New":
+      return "The mission has been registered but no agent has picked it up yet. It is waiting for the daemon or a run-once to start planning.";
     case "Planning":
-      return "The mission is still shaping the execution path. Treat this as an early pipeline state where context and plan quality matter most.";
+      return "The planner is currently producing the technical plan. Treat this as an early pipeline state where context and plan quality matter most.";
+    case "PlanReady":
+      return "The plan has been written. The mission is waiting for the executor stage to start coding.";
     case "Coding":
       return "Implementation is active on the mission branch. Expect code and logs to keep changing until verification starts.";
     case "Testing":
@@ -271,8 +277,12 @@ function createStatusNote(status: MissionStatus, mission: ApiMission): string {
 
 function createOperatorSignal(status: MissionStatus, mission: ApiMission): string {
   switch (status) {
+    case "New":
+      return "Nothing to act on. Watch only if the mission stays here longer than the poll interval.";
     case "Planning":
       return "Healthy early-stage flow. Watch for plan quality, not repository state.";
+    case "PlanReady":
+      return "The handoff from planner to executor is the watchpoint. Long stays here usually mean executor wasn't triggered.";
     case "Coding":
       return "Mission is in motion. Intervention is unnecessary unless execution stalls.";
     case "Testing":

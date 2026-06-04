@@ -16,12 +16,20 @@ workItems:
 planner:
   provider: claude-cli
   command: claude
+  # Optional: pin the Claude model. Use a non-1M-context model unless your
+  # account has the corresponding usage credits enabled. Example: claude-sonnet-4-6.
+  # model: claude-sonnet-4-6
 
 executor:
   provider: codex-cli
   command: codex
   sandbox: workspace-write
   approval: never
+  # To use opencode instead of codex, switch provider/command and set a model.
+  # provider: opencode-cli
+  # command: opencode
+  # model: opencode/minimax-m3-free
+  # (sandbox and approval are codex-only and ignored by opencode-cli.)
 
 tests:
   commands:
@@ -36,6 +44,13 @@ safety:
     - .env.production
     - appsettings.Production.json
     - secrets/
+  # Opt-in: when true, Agent Foreman enables GitHub auto-merge on the PR
+  # immediately after creation via `gh pr merge --auto`. GitHub will then
+  # merge automatically once required checks and approvals (if any) are met.
+  # Default false. Use with care — once enabled, every PR the agent opens
+  # will be merged as soon as the repo allows.
+  # autoMergeAfterChecks: false
+  # autoMergeMethod: squash # one of: squash | merge | rebase
 
 quota:
   retryAfterHours: 5

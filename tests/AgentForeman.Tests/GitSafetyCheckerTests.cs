@@ -80,7 +80,7 @@ public sealed class GitSafetyCheckerTests
         var result = await checker.CheckAsync("/repo",
             new SafetyConfig
             {
-                MaxFilesChanged = 25,
+                MaxFilesChanged = 100,
                 ForbiddenPaths = new[] { ".env", "secrets/" },
             },
             CancellationToken.None);

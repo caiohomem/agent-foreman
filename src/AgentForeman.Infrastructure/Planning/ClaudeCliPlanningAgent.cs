@@ -20,10 +20,11 @@ public sealed class ClaudeCliPlanningAgent : IPlanningAgent
         var planPath = Path.Combine(request.OutputDirectory, "plan.md");
         var logPath = Path.Combine(request.OutputDirectory, "claude-plan.log");
         var prompt = BuildPrompt(request);
+        var arguments = BuildArguments(request.Config.Planner.Model, prompt);
         var result = await _commandRunner.RunAsync(
             new CommandRequest(
                 request.Config.Planner.Command,
-                new[] { "--print", prompt },
+                arguments,
                 WorkingDirectory: request.RepoPath),
             cancellationToken: cancellationToken);
 
@@ -41,6 +42,18 @@ public sealed class ClaudeCliPlanningAgent : IPlanningAgent
                 result.StartedAt,
                 result.FinishedAt,
                 string.IsNullOrWhiteSpace(result.StderrText) ? "Claude planner failed." : result.StderrText.Trim());
+    }
+
+    private static IReadOnlyList<string> BuildArguments(string model, string prompt)
+    {
+        var arguments = new List<string>(capacity: 3) { "--print" };
+        if (!string.IsNullOrWhiteSpace(model))
+        {
+            arguments.Add("--model");
+            arguments.Add(model);
+        }
+        arguments.Add(prompt);
+        return arguments;
     }
 
     private static string BuildPrompt(PlanningRequest request)

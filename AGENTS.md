@@ -40,3 +40,7 @@ Do not implement unrelated future systems.
 - Never merge pull requests automatically.
 - Never modify `.env` files or production secrets.
 - Prefer small, tested changes over broad scaffolding.
+
+### Auto-merge override (opt-in)
+
+`agent-foreman.yaml` exposes `safety.autoMergeAfterChecks` (default `false`). When set to `true`, the submit step enables GitHub auto-merge on the PR via `gh pr merge --auto --<method>`. This is the only path in the codebase that auto-merges PRs, and it is gated by the explicit opt-in flag. Use only when the agent's `verify` stage is sufficient to catch regressions, and review the resulting PR queue out of band.

@@ -1,5 +1,7 @@
 export type MissionStatus =
+  | "New"
   | "Planning"
+  | "PlanReady"
   | "Coding"
   | "Testing"
   | "PausedQuota"
