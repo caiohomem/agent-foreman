@@ -1,6 +1,6 @@
 project:
   name: elevator-ads-mvp
-  repoPath: /workspace/elevator-ads-mvp
+  repoPath: /home/caioh/ai-lab/elevator-ads-mvp
   defaultBranch: main
 
 workItems:
@@ -26,7 +26,7 @@ executor:
 
 tests:
   commands:
-    - dotnet test /workspace/elevator-ads-mvp/backend/ElevatorAds.sln
+    - dotnet test /home/caioh/ai-lab/elevator-ads-mvp/backend/ElevatorAds.sln
     - npm --prefix frontend/elevator-ads-admin run build
 
 safety:
