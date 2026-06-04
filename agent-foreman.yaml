@@ -1,6 +1,6 @@
 project:
   name: elevator-ads-mvp
-  repoPath: /home/caioh/elevator-ads-mvp
+  repoPath: /workspace/elevator-ads-mvp
   defaultBranch: main
 
 workItems:
@@ -26,7 +26,7 @@ executor:
 
 tests:
   commands:
-    - dotnet test /home/caioh/elevator-ads-mvp/backend/ElevatorAds.sln
+    - dotnet test /workspace/elevator-ads-mvp/backend/ElevatorAds.sln
     - npm --prefix frontend/elevator-ads-admin run build
 
 safety:
@@ -52,7 +52,7 @@ quota:
 
 database:
   provider: postgresql
-  connectionString: Host=localhost;Port=5432;Database=agent_foreman;Username=agent_foreman;Password=agent_foreman
+  connectionString: Host=postgres;Port=5432;Database=agent_foreman;Username=agent_foreman;Password=agent_foreman
 
 daemon:
   pollIntervalSeconds: 30

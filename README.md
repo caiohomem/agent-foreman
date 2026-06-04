@@ -360,7 +360,7 @@ Run the API, dashboard, and PostgreSQL together:
 docker compose up -d --build
 ```
 
-The Compose setup uses `agent-foreman.docker.yaml`, with `repoPath` set to `/home/caioh/elevator-ads-mvp` for the WSL home-directory layout. It also reuses the existing PostgreSQL data volume from the previous `agent-foreman-postgres` container.
+The Compose setup uses the single project config `agent-foreman.yaml`, with `repoPath` set to `/workspace/elevator-ads-mvp`. It also reuses the existing PostgreSQL data volume from the previous `agent-foreman-postgres` container.
 
 Services are exposed on:
 

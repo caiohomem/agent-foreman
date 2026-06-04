@@ -29,8 +29,8 @@ services:
     ports:
       - "52888:8080"
     volumes:
-      - ./agent-foreman.docker.yaml:/app/config/agent-foreman.yaml:ro
-      - /home/caioh/elevator-ads-mvp:/home/caioh/elevator-ads-mvp
+      - ./agent-foreman.yaml:/app/config/agent-foreman.yaml:ro
+      - ../elevator-ads-mvp:/workspace/elevator-ads-mvp
     depends_on:
       postgres:
         condition: service_healthy
