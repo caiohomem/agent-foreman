@@ -38,6 +38,24 @@ public sealed class WorkItemDependencyParserTests
     }
 
     [Fact]
+    public void ParsesDependenciesWithoutColon()
+    {
+        var dependencies = _parser.Parse("Depends on #10", "caio/elevator-ads-mvp");
+
+        var dependency = Assert.Single(dependencies);
+        Assert.Equal("10", dependency.Reference);
+    }
+
+    [Fact]
+    public void ParsesQuotedDependenciesWithoutColon()
+    {
+        var dependencies = _parser.Parse("> Depends on #10", "caio/elevator-ads-mvp");
+
+        var dependency = Assert.Single(dependencies);
+        Assert.Equal("10", dependency.Reference);
+    }
+
+    [Fact]
     public void IgnoresBodiesWithoutDependencies()
     {
         var dependencies = _parser.Parse("No blockers here", "caio/elevator-ads-mvp");
@@ -45,4 +63,3 @@ public sealed class WorkItemDependencyParserTests
         Assert.Empty(dependencies);
     }
 }
-

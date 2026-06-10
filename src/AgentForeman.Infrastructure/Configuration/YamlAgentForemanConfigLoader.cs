@@ -79,6 +79,20 @@ public sealed class YamlAgentForemanConfigLoader : IAgentForemanConfigLoader
                     ?? values.GetNullableInt("daemon", "pollintervalseconds")
                     ?? 300,
                 RunOnStartup = values.GetNullableBool("daemon", "runOnStartup") ?? true,
+                BlockOnAnyFailedMission = values.GetNullableBool("daemon", "blockOnAnyFailedMission") ?? false,
+            },
+            Recovery = new RecoveryConfig
+            {
+                Enabled = values.GetNullableBool("recovery", "enabled") ?? false,
+                MaxAttempts = values.GetNullableInt("recovery", "maxAttempts") ?? 2,
+                TestRepairAttempts = values.GetNullableInt("recovery", "testRepairAttempts") ?? 2,
+                Model = values.GetScalar("recovery", "model"),
+            },
+            Memory = new MemoryConfig
+            {
+                Enabled = values.GetNullableBool("memory", "enabled") ?? false,
+                TopKLessons = values.GetNullableInt("memory", "topKLessons") ?? 3,
+                InjectResumeContext = values.GetNullableBool("memory", "injectResumeContext") ?? true,
             },
         };
 

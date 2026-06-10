@@ -57,8 +57,25 @@ internal static class CodingPromptBuilder
             builder.AppendLine(request.CurrentDiff);
         }
 
+        if (request.Lessons is { Count: > 0 })
+        {
+            builder.AppendLine();
+            builder.AppendLine("Lessons from previous runs (apply when relevant):");
+            foreach (var lesson in request.Lessons)
+                builder.AppendLine($"- {lesson.Title}: {Truncate(lesson.Body, 500)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.ResumeSummary))
+        {
+            builder.AppendLine();
+            builder.AppendLine("Resume context from the previous run:");
+            builder.AppendLine(request.ResumeSummary);
+        }
+
         return builder.ToString();
     }
+
+    private static string Truncate(string value, int max) => value.Length <= max ? value : value[..max];
 
     public static string BuildLog(CommandResult result)
     {

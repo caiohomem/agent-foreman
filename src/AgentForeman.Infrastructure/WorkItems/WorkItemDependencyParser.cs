@@ -40,10 +40,9 @@ public sealed partial class WorkItemDependencyParser : IWorkItemDependencyParser
         return dependencies;
     }
 
-    [GeneratedRegex(@"^\s*depends on:\s*(?<values>.+)\s*$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^\s*>?\s*depends on\s*:?\s*(?<values>.+)\s*$", RegexOptions.IgnoreCase)]
     private static partial Regex DependsOnLineRegex();
 
     [GeneratedRegex(@"^(?:(?<repo>[\w.-]+/[\w.-]+))?#(?<number>\d+)$", RegexOptions.IgnoreCase)]
     private static partial Regex DependencyRegex();
 }
-

@@ -1,5 +1,6 @@
 using AgentForeman.Core.Configuration;
 using AgentForeman.Core.WorkItems;
+using AgentForeman.Core.State;
 
 namespace AgentForeman.Core.Planning;
 
@@ -12,5 +13,5 @@ public sealed record PlanningRequest(
     string RepoPath,
     string OutputDirectory,
     string? AgentsContent,
-    AgentForemanConfig Config);
-
+    AgentForemanConfig Config,
+    IReadOnlyList<Lesson>? Lessons = null);

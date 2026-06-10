@@ -90,6 +90,12 @@ public sealed class CliGitRepository : IGitRepository
         }
     }
 
+    public async Task<bool> StashAsync(string repoPath, string message, CancellationToken cancellationToken = default)
+    {
+        var result = await RunGitAsync(repoPath, new[] { "stash", "push", "-u", "-m", message }, cancellationToken);
+        return result.Success;
+    }
+
     private Task<CommandResult> RunGitAsync(string repoPath, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
     {
         return _commandRunner.RunAsync(

@@ -11,6 +11,9 @@ using AgentForeman.Core.Summaries;
 using AgentForeman.Core.Testing;
 using AgentForeman.Core.WorkItems;
 using AgentForeman.Infrastructure.Summaries;
+using AgentForeman.Core.Recovery;
+using AgentForeman.Infrastructure.Memory;
+using System.Text.Json;
 
 namespace AgentForeman.Infrastructure.Orchestration;
 
@@ -28,6 +31,10 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
     private readonly IWorkItemDependencyResolver _dependencyResolver;
     private readonly IMissionEventRecorder _missionEventRecorder;
     private readonly RunSummaryService? _runSummaryService;
+    private readonly IRecoveryAgent? _recoveryAgent;
+    private readonly IRecoveryRemediator? _recoveryRemediator;
+    private readonly ILessonRepository? _lessonRepository;
+    private readonly MemoryContextProvider? _memoryContextProvider;
 
     public MissionOrchestrator(
         IWorkItemProvider workItemProvider,
@@ -41,7 +48,11 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
         IMissionBranchPreparer branchPreparer,
         IWorkItemDependencyResolver dependencyResolver,
         IMissionEventRecorder missionEventRecorder,
-        RunSummaryService? runSummaryService = null)
+        RunSummaryService? runSummaryService = null,
+        IRecoveryAgent? recoveryAgent = null,
+        IRecoveryRemediator? recoveryRemediator = null,
+        ILessonRepository? lessonRepository = null,
+        MemoryContextProvider? memoryContextProvider = null)
     {
         _workItemProvider = workItemProvider;
         _planningAgent = planningAgent;
@@ -55,12 +66,25 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
         _dependencyResolver = dependencyResolver;
         _missionEventRecorder = missionEventRecorder;
         _runSummaryService = runSummaryService;
+        _recoveryAgent = recoveryAgent;
+        _recoveryRemediator = recoveryRemediator;
+        _lessonRepository = lessonRepository;
+        _memoryContextProvider = memoryContextProvider;
     }
 
     public async Task<RunOnceResult> RunOnceAsync(RunOnceRequest request, Action<string>? onProgress, CancellationToken cancellationToken)
     {
         var config = request.Config;
         var repoPath = config.Project.RepoPath;
+
+        if (config.Daemon.BlockOnAnyFailedMission
+            && TryGetBlockingFailedMission(out var blockingMission))
+        {
+            var errorMessage =
+                $"Refusing to start new work because mission {blockingMission!.Id} is in status {blockingMission.Status}.";
+            onProgress?.Invoke(errorMessage);
+            return FailureResult(null, blockingMission.Status, errorMessage);
+        }
 
         var readyItems = await _workItemProvider.GetReadyItemsAsync(cancellationToken);
         readyItems = OrderReadyItems(readyItems);
@@ -167,6 +191,7 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
         var missionId = $"{item.Source.ToString().ToLowerInvariant()}-{item.ExternalId}";
         var outputDirectory = Path.Combine(repoPath, ".agent", "runs", $"issue-{SanitizePathSegment(item.ExternalId)}");
         var agentsContent = ReadAgentsFile(repoPath);
+        var lessons = await GetLessonsAsync(item, config, cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
         var existingMission = _missionRepository.GetById(missionId);
@@ -204,7 +229,8 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
             repoPath,
             outputDirectory,
             agentsContent,
-            config);
+            config,
+            lessons);
 
         PlanningResult planResult;
         try
@@ -222,6 +248,15 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
             return FailureResult(item, MissionStatus.Failed, ex.Message);
         }
 
+        if (!planResult.Success)
+        {
+            if (!IsQuotaFailure(planResult.Stdout, planResult.Stderr, planResult.ErrorMessage, config)
+                && await TryRecoverStageAsync(mission, item, FailedStage.Planning, planResult.ErrorMessage ?? "Planning failed.",
+                    planResult.Stdout, planResult.Stderr, outputDirectory, config, 1, cancellationToken))
+            {
+                planResult = await _planningAgent.CreatePlanAsync(planRequest, cancellationToken);
+            }
+        }
         if (!planResult.Success)
         {
             if (IsQuotaFailure(planResult.Stdout, planResult.Stderr, planResult.ErrorMessage, config))
@@ -272,6 +307,12 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
         var branchPrepResult = await _branchPreparer.PrepareAsync(
             new BranchPreparationRequest(repoPath, config.Project.DefaultBranch, agentBranch),
             cancellationToken);
+        if (!branchPrepResult.Success && await TryRecoverStageAsync(mission, item, FailedStage.BranchPrep,
+                branchPrepResult.ErrorMessage ?? "Branch preparation failed.", "", "", outputDirectory, config, 1, cancellationToken))
+        {
+            branchPrepResult = await _branchPreparer.PrepareAsync(
+                new BranchPreparationRequest(repoPath, config.Project.DefaultBranch, agentBranch), cancellationToken);
+        }
         if (!branchPrepResult.Success)
         {
             mission = mission with { Status = MissionStatus.Failed, LastError = branchPrepResult.ErrorMessage, UpdatedAt = DateTimeOffset.UtcNow };
@@ -302,7 +343,8 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
             agentsContent,
             PreviousLogs: null,
             CurrentDiff: null,
-            config);
+            config,
+            lessons);
 
         CodingResult codingResult;
         try
@@ -320,6 +362,15 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
             return FailureResult(item, MissionStatus.Failed, ex.Message);
         }
 
+        if (!codingResult.Success)
+        {
+            if (!codingResult.QuotaDetected && !IsQuotaFailure(codingResult.Stdout, codingResult.Stderr, codingResult.ErrorMessage, config)
+                && await TryRecoverStageAsync(mission, item, FailedStage.Coding, codingResult.ErrorMessage ?? "Execution failed.",
+                    codingResult.Stdout, codingResult.Stderr, outputDirectory, config, 1, cancellationToken))
+            {
+                codingResult = await _codingAgent.ExecuteAsync(codingRequest, cancellationToken);
+            }
+        }
         if (!codingResult.Success)
         {
             if (codingResult.QuotaDetected || IsQuotaFailure(codingResult.Stdout, codingResult.Stderr, codingResult.ErrorMessage, config))
@@ -385,6 +436,11 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
             return FailureResult(item, MissionStatus.TestsFailed, ex.Message);
         }
 
+        if (!testResult.Success)
+        {
+            testResult = await TryRepairTestsAsync(item, config, planResult.PlanPath, planResult.Stdout, outputDirectory,
+                agentsContent, lessons, null, testRequest, testResult, cancellationToken);
+        }
         if (!testResult.Success)
         {
             mission = mission with { Status = MissionStatus.TestsFailed, LastError = testResult.ErrorMessage, UpdatedAt = DateTimeOffset.UtcNow };
@@ -524,6 +580,13 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
         var outputDirectory = Path.Combine(repoPath, ".agent", "runs", $"issue-{SanitizePathSegment(item.ExternalId)}");
         var planFilePath = Path.Combine(outputDirectory, "plan.md");
         var codexLogPath = Path.Combine(outputDirectory, "codex-exec.log");
+        var lessons = await GetLessonsAsync(item, config, cancellationToken);
+        string? resumeSummary = null;
+        if (_memoryContextProvider is not null && config.Memory.Enabled)
+        {
+            try { resumeSummary = await _memoryContextProvider.GetResumeContextAsync(mission.Id, config, cancellationToken); }
+            catch { }
+        }
 
         var agentBranch = $"agent/issue-{item.ExternalId}";
         var startStage = DetermineStartStage(mission, planFilePath);
@@ -546,7 +609,7 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
             var agentsContent = ReadAgentsFile(repoPath);
             var planRequest = new PlanningRequest(
                 item.ExternalId, item.Title, item.Body, item.Labels,
-                item.Repository, repoPath, outputDirectory, agentsContent, config);
+                item.Repository, repoPath, outputDirectory, agentsContent, config, lessons);
 
             PlanningResult planResult;
             try
@@ -561,6 +624,15 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
                 return ResumeFailureResult(MissionStatus.Failed, ex.Message);
             }
 
+            if (!planResult.Success)
+            {
+                if (!IsQuotaFailure(planResult.Stdout, planResult.Stderr, planResult.ErrorMessage, config)
+                    && await TryRecoverStageAsync(mission, item, FailedStage.Planning, planResult.ErrorMessage ?? "Planning failed.",
+                        planResult.Stdout, planResult.Stderr, outputDirectory, config, 1, cancellationToken))
+                {
+                    planResult = await _planningAgent.CreatePlanAsync(planRequest, cancellationToken);
+                }
+            }
             if (!planResult.Success)
             {
                 if (IsQuotaFailure(planResult.Stdout, planResult.Stderr, planResult.ErrorMessage, config))
@@ -595,6 +667,15 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
                 cancellationToken);
             if (!resumeBranchPrepResult.Success)
             {
+                if (await TryRecoverStageAsync(mission, item, FailedStage.BranchPrep,
+                        resumeBranchPrepResult.ErrorMessage ?? "Branch preparation failed.", "", "", outputDirectory, config, 1, cancellationToken))
+                {
+                    resumeBranchPrepResult = await _branchPreparer.PrepareAsync(
+                        new BranchPreparationRequest(repoPath, config.Project.DefaultBranch, agentBranch), cancellationToken);
+                }
+            }
+            if (!resumeBranchPrepResult.Success)
+            {
                 mission = mission with { Status = MissionStatus.Failed, LastError = resumeBranchPrepResult.ErrorMessage, UpdatedAt = DateTimeOffset.UtcNow };
                 _missionRepository.Save(mission);
                 await TryMarkAsFailedAsync(item, resumeBranchPrepResult.ErrorMessage ?? "Branch preparation failed.", cancellationToken);
@@ -616,7 +697,7 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
             var codingRequest = new CodingRequest(
                 item.ExternalId, item.Title, item.Body, item.Labels, item.Repository,
                 repoPath, currentPlanPath, planContent,
-                outputDirectory, agentsContent, previousLogs, currentDiff, config);
+                outputDirectory, agentsContent, previousLogs, currentDiff, config, lessons, resumeSummary);
 
             CodingResult codingResult;
             try
@@ -631,6 +712,15 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
                 return ResumeFailureResult(MissionStatus.Failed, ex.Message);
             }
 
+            if (!codingResult.Success)
+            {
+                if (!codingResult.QuotaDetected && !IsQuotaFailure(codingResult.Stdout, codingResult.Stderr, codingResult.ErrorMessage, config)
+                    && await TryRecoverStageAsync(mission, item, FailedStage.Coding, codingResult.ErrorMessage ?? "Execution failed.",
+                        codingResult.Stdout, codingResult.Stderr, outputDirectory, config, 1, cancellationToken))
+                {
+                    codingResult = await _codingAgent.ExecuteAsync(codingRequest, cancellationToken);
+                }
+            }
             if (!codingResult.Success)
             {
                 if (codingResult.QuotaDetected || IsQuotaFailure(codingResult.Stdout, codingResult.Stderr, codingResult.ErrorMessage, config))
@@ -684,6 +774,12 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
                 return ResumeFailureResult(MissionStatus.TestsFailed, ex.Message);
             }
 
+            if (!testResult.Success)
+            {
+                var repairPlanContent = planContent ?? (File.Exists(currentPlanPath) ? File.ReadAllText(currentPlanPath) : string.Empty);
+                testResult = await TryRepairTestsAsync(item, config, currentPlanPath, repairPlanContent, outputDirectory,
+                    ReadAgentsFile(repoPath), lessons, resumeSummary, testRequest, testResult, cancellationToken);
+            }
             if (!testResult.Success)
             {
                 mission = mission with { Status = MissionStatus.TestsFailed, LastError = testResult.ErrorMessage, UpdatedAt = DateTimeOffset.UtcNow };
@@ -802,6 +898,11 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
         }
 
         var runOnceResult = await RunOnceAsync(new RunOnceRequest(config), onProgress, cancellationToken);
+        if (!runOnceResult.Success)
+        {
+            return new DaemonTickResult(false, false, runOnceResult.ErrorMessage, null);
+        }
+
         if (runOnceResult.NoReadyWorkItems)
         {
             return new DaemonTickResult(false, true, null, null);
@@ -831,6 +932,13 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
     private static ResumeResult ResumeFailureResult(MissionStatus status, string errorMessage) =>
         new(false, null, status, errorMessage, false, null);
 
+    private bool TryGetBlockingFailedMission(out Mission? mission)
+    {
+        mission = _missionRepository.GetByStatus(MissionStatus.Failed, 1).FirstOrDefault()
+            ?? _missionRepository.GetByStatus(MissionStatus.TestsFailed, 1).FirstOrDefault();
+        return mission is not null;
+    }
+
     private static ResumeStage DetermineStartStage(Mission mission, string planFilePath)
     {
         return mission.Status switch
@@ -853,9 +961,9 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
 
     private enum ResumeStage { Plan, Execute, Verify, Submit }
 
-    private static RunOnceResult FailureResult(WorkItem item, MissionStatus status, string errorMessage)
+    private static RunOnceResult FailureResult(WorkItem? item, MissionStatus status, string errorMessage)
     {
-        return new RunOnceResult(false, null, item.ExternalId, item.Title, status, errorMessage, false, false, false, null);
+        return new RunOnceResult(false, null, item?.ExternalId, item?.Title, status, errorMessage, false, false, false, null);
     }
 
     private static bool IsQuotaFailure(string stdout, string stderr, string? errorMessage, AgentForemanConfig config)
@@ -991,6 +1099,82 @@ public sealed class MissionOrchestrator : IMissionOrchestrator
         {
             return null;
         }
+    }
+
+    private async Task<IReadOnlyList<Lesson>> GetLessonsAsync(WorkItem item, AgentForemanConfig config, CancellationToken cancellationToken)
+    {
+        if (_memoryContextProvider is null) return Array.Empty<Lesson>();
+        try { return await _memoryContextProvider.GetLessonsAsync($"{item.Title} {item.Body}", config, cancellationToken); }
+        catch { return Array.Empty<Lesson>(); }
+    }
+
+    private async Task<TestRunResult> TryRepairTestsAsync(WorkItem item, AgentForemanConfig config, string planPath,
+        string planContent, string outputDirectory, string? agentsContent, IReadOnlyList<Lesson> lessons, string? resumeSummary,
+        TestRunRequest testRequest, TestRunResult testResult, CancellationToken cancellationToken)
+    {
+        if (!config.Recovery.Enabled || config.Recovery.TestRepairAttempts <= 0) return testResult;
+
+        for (var attempt = 1; attempt <= config.Recovery.TestRepairAttempts && !testResult.Success; attempt++)
+        {
+            var testsLog = File.Exists(testResult.LogPath) ? await File.ReadAllTextAsync(testResult.LogPath, cancellationToken) : testResult.ErrorMessage;
+            var executorLogPath = Path.Combine(outputDirectory, "codex-exec.log");
+            var executorLog = File.Exists(executorLogPath) ? await File.ReadAllTextAsync(executorLogPath, cancellationToken) : null;
+            var previousLogs = $"{testsLog}{Environment.NewLine}{executorLog}";
+            var diff = await TryGetDiffAsync(config.Project.RepoPath, cancellationToken);
+            var request = new CodingRequest(item.ExternalId, item.Title, item.Body, item.Labels, item.Repository,
+                config.Project.RepoPath, planPath, planContent, outputDirectory, agentsContent, previousLogs, diff, config, lessons, resumeSummary);
+            var codingResult = await _codingAgent.ExecuteAsync(request, cancellationToken);
+            var repairLog = Path.Combine(outputDirectory, $"repair-{attempt}.log");
+            await File.WriteAllTextAsync(repairLog,
+                $"Repair attempt {attempt}{Environment.NewLine}Success: {codingResult.Success}{Environment.NewLine}STDOUT:{Environment.NewLine}{codingResult.Stdout}{Environment.NewLine}STDERR:{Environment.NewLine}{codingResult.Stderr}",
+                cancellationToken);
+            if (!codingResult.Success) break;
+            testResult = await _testRunner.RunAsync(testRequest, cancellationToken);
+        }
+        return testResult;
+    }
+
+    private async Task<bool> TryRecoverStageAsync(Mission mission, WorkItem item, FailedStage stage, string error,
+        string stdout, string stderr, string outputDirectory, AgentForemanConfig config, int attempt, CancellationToken cancellationToken)
+    {
+        if (!config.Recovery.Enabled || attempt > config.Recovery.MaxAttempts || _recoveryAgent is null || _recoveryRemediator is null)
+            return false;
+
+        await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.RecoveryStarted, MissionEventLevel.Warning,
+            $"Starting recovery for {stage}.", cancellationToken);
+        try
+        {
+            var status = await _gitRepository.GetStatusAsync(config.Project.RepoPath, cancellationToken);
+            var gitStatus = string.Join(Environment.NewLine, status.ChangedFiles.Select(x => $"{x.StatusCode} {x.Path}"));
+            var diagnosis = await _recoveryAgent.DiagnoseAsync(new RecoveryRequest(mission.Id, item.ExternalId, stage, error,
+                stdout, stderr, gitStatus, attempt, await GetLessonsAsync(item, config, cancellationToken), config, outputDirectory), cancellationToken);
+            var metadata = JsonSerializer.Serialize(diagnosis);
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.RecoveryDiagnosed, MissionEventLevel.Warning,
+                diagnosis.Diagnosis, cancellationToken, metadata);
+            var result = await _recoveryRemediator.RemediateAsync(diagnosis,
+                new RemediationContext(mission.Id, config.Project.RepoPath, stage), cancellationToken);
+            await SaveLessonAsync(mission, item, diagnosis, result.Success ? "Remediated" : "Failed", cancellationToken);
+            await RecordEventAsync(mission.Id, item.ExternalId, result.Success ? MissionEventType.RecoverySucceeded : MissionEventType.RecoveryFailed,
+                result.Success ? MissionEventLevel.Info : MissionEventLevel.Error,
+                result.Success ? diagnosis.ProposedAction : result.ErrorMessage ?? diagnosis.Diagnosis, cancellationToken, metadata);
+            return result.Success && result.RetryStage;
+        }
+        catch (Exception ex)
+        {
+            await RecordEventAsync(mission.Id, item.ExternalId, MissionEventType.RecoveryFailed, MissionEventLevel.Error, ex.Message, cancellationToken);
+            return false;
+        }
+    }
+
+    private async Task SaveLessonAsync(Mission mission, WorkItem item, RecoveryDiagnosis diagnosis, string outcome, CancellationToken cancellationToken)
+    {
+        if (_lessonRepository is null || string.IsNullOrWhiteSpace(diagnosis.LessonTitle)) return;
+        try
+        {
+            await _lessonRepository.SaveAsync(new Lesson(Guid.NewGuid().ToString("N"), mission.Id, item.ExternalId,
+                diagnosis.Category.ToString(), diagnosis.LessonTitle, diagnosis.LessonBody, outcome, "Recovery", DateTimeOffset.UtcNow), cancellationToken);
+        }
+        catch { }
     }
 
     internal static IReadOnlyList<WorkItem> OrderReadyItems(IReadOnlyList<WorkItem> items)

@@ -31,6 +31,8 @@ using AgentForeman.Infrastructure.Prerequisites;
 using AgentForeman.Infrastructure.State;
 using AgentForeman.Infrastructure.Summaries;
 using AgentForeman.Infrastructure.WorkItems;
+using AgentForeman.Infrastructure.Recovery;
+using AgentForeman.Infrastructure.Memory;
 
 namespace AgentForeman.Cli;
 
@@ -1502,10 +1504,13 @@ public static class CliApplication
         }
 
         var runSummaryService = CreateRunSummaryService(config, commandRunner, gitRepository, runSummaryRepository, runSummaryGenerator);
+        var lessonRepository = new PostgresLessonRepository(config.Database.ConnectionString);
+        var memoryContextProvider = new MemoryContextProvider(lessonRepository, runSummaryRepository ?? new PostgresRunSummaryRepository(config.Database.ConnectionString));
         branchPreparer ??= new MissionBranchPreparer(gitRepository);
         var orchestrator = new MissionOrchestrator(
             workItemProvider, planningAgent, codingAgent, testRunner, safetyChecker,
-            pullRequestProvider, gitRepository, missionRepository, branchPreparer, dependencyResolver, missionEventRecorder, runSummaryService);
+            pullRequestProvider, gitRepository, missionRepository, branchPreparer, dependencyResolver, missionEventRecorder, runSummaryService,
+            new ClaudeCliRecoveryAgent(commandRunner), new RecoveryRemediator(gitRepository), lessonRepository, memoryContextProvider);
 
         var output = new StringBuilder();
         ResumeResult result;
@@ -1840,10 +1845,13 @@ public static class CliApplication
         dependencyResolver ??= new GitHubWorkItemDependencyResolver(config, commandRunner);
         missionEventRecorder ??= new PostgresMissionEventRecorder(config.Database.ConnectionString);
         var runSummaryService = CreateRunSummaryService(config, commandRunner, gitRepository, runSummaryRepository, runSummaryGenerator);
+        var lessonRepository = new PostgresLessonRepository(config.Database.ConnectionString);
+        var memoryContextProvider = new MemoryContextProvider(lessonRepository, runSummaryRepository ?? new PostgresRunSummaryRepository(config.Database.ConnectionString));
         branchPreparer ??= new MissionBranchPreparer(gitRepository);
         orchestrator ??= new MissionOrchestrator(
             workItemProvider, planningAgent, codingAgent, testRunner,
-            safetyChecker, pullRequestProvider, gitRepository, missionRepository, branchPreparer, dependencyResolver, missionEventRecorder, runSummaryService);
+            safetyChecker, pullRequestProvider, gitRepository, missionRepository, branchPreparer, dependencyResolver, missionEventRecorder, runSummaryService,
+            new ClaudeCliRecoveryAgent(commandRunner), new RecoveryRemediator(gitRepository), lessonRepository, memoryContextProvider);
 
         var pollInterval = intervalOverride ?? config.Daemon.PollIntervalSeconds;
         var output = new StringBuilder();
@@ -2121,11 +2129,14 @@ public static class CliApplication
         dependencyResolver ??= new GitHubWorkItemDependencyResolver(config, commandRunner);
         missionEventRecorder ??= new PostgresMissionEventRecorder(config.Database.ConnectionString);
         var runSummaryService = CreateRunSummaryService(config, commandRunner, gitRepository, runSummaryRepository, runSummaryGenerator);
+        var lessonRepository = new PostgresLessonRepository(config.Database.ConnectionString);
+        var memoryContextProvider = new MemoryContextProvider(lessonRepository, runSummaryRepository ?? new PostgresRunSummaryRepository(config.Database.ConnectionString));
 
         branchPreparer ??= new MissionBranchPreparer(gitRepository);
         var orchestrator = new MissionOrchestrator(
             workItemProvider, planningAgent, codingAgent, testRunner, safetyChecker,
-            pullRequestProvider, gitRepository, missionRepository, branchPreparer, dependencyResolver, missionEventRecorder, runSummaryService);
+            pullRequestProvider, gitRepository, missionRepository, branchPreparer, dependencyResolver, missionEventRecorder, runSummaryService,
+            new ClaudeCliRecoveryAgent(commandRunner), new RecoveryRemediator(gitRepository), lessonRepository, memoryContextProvider);
 
         var output = new StringBuilder();
         RunOnceResult result;

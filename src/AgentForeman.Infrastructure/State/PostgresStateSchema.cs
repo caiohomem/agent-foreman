@@ -64,6 +64,21 @@ public static class PostgresStateSchema
             created_at TIMESTAMPTZ NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS agent_lessons (
+            id TEXT PRIMARY KEY,
+            mission_id TEXT NULL,
+            external_work_item_id TEXT NULL,
+            category TEXT NOT NULL,
+            title TEXT NOT NULL,
+            body TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            source TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL,
+            search_tsv tsvector GENERATED ALWAYS AS (to_tsvector('simple', title || ' ' || body)) STORED
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_agent_lessons_tsv ON agent_lessons USING GIN (search_tsv);
+
         CREATE TABLE IF NOT EXISTS provider_states (
             provider TEXT PRIMARY KEY,
             status TEXT NOT NULL,

@@ -28,4 +28,8 @@ public enum MissionEventType
     CommandFailed,
     AutoMergeEnabled,
     AutoMergeFailed,
+    RecoveryStarted,
+    RecoveryDiagnosed,
+    RecoverySucceeded,
+    RecoveryFailed,
 }

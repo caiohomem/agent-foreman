@@ -1,5 +1,6 @@
 using AgentForeman.Core.Configuration;
 using AgentForeman.Core.WorkItems;
+using AgentForeman.Core.State;
 
 namespace AgentForeman.Core.Coding;
 
@@ -16,4 +17,6 @@ public sealed record CodingRequest(
     string? AgentsContent,
     string? PreviousLogs,
     string? CurrentDiff,
-    AgentForemanConfig Config);
+    AgentForemanConfig Config,
+    IReadOnlyList<Lesson>? Lessons = null,
+    string? ResumeSummary = null);

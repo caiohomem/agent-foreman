@@ -30,6 +30,7 @@ public sealed class ConfigLoaderTests
         Assert.Contains(".env.production", result.Config.Safety.ForbiddenPaths);
         Assert.Contains("too many requests", result.Config.Quota.QuotaPatterns);
         Assert.Equal(30, result.Config.Daemon.PollIntervalSeconds);
+        Assert.False(result.Config.Daemon.BlockOnAnyFailedMission);
     }
 
     [Fact]
@@ -73,6 +74,21 @@ public sealed class ConfigLoaderTests
         Assert.True(result.IsValid);
         Assert.NotNull(result.Config);
         Assert.Equal(45, result.Config.Daemon.PollIntervalSeconds);
+    }
+
+    [Fact]
+    public void DaemonBlockOnFailedMissionFlagIsLoaded()
+    {
+        using var tempFile = TempConfigFile.Create(ValidConfigYaml.Replace(
+            "blockOnAnyFailedMission: false",
+            "blockOnAnyFailedMission: true"));
+        var loader = new YamlAgentForemanConfigLoader();
+
+        var result = loader.Load(tempFile.Path);
+
+        Assert.True(result.IsValid);
+        Assert.NotNull(result.Config);
+        Assert.True(result.Config.Daemon.BlockOnAnyFailedMission);
     }
 
     [Fact]
@@ -177,6 +193,7 @@ public sealed class ConfigLoaderTests
 
         daemon:
           pollIntervalSeconds: 30
+          blockOnAnyFailedMission: false
 
         """;
 }

@@ -414,6 +414,34 @@ public sealed class CliRunOnceTests
         Assert.Equal(0, services.PullRequests.AutoMergeCallCount);
         Assert.DoesNotContain(services.Events.Events, e => e.EventType == MissionEventType.AutoMergeEnabled);
     }
+
+    [Fact]
+    public void RunOnceRefusesNewWorkWhenBlockingFailedMissionExists()
+    {
+        var missions = new FakeMissionRepository();
+        missions.Save(new Mission(
+            "github-41",
+            "41",
+            "GitHub",
+            "Broken mission",
+            MissionStatus.Failed,
+            Branch: null,
+            PlanPath: null,
+            PullRequestUrl: null,
+            RetryAfter: null,
+            LastError: "tests exploded",
+            CreatedAt: DateTimeOffset.UtcNow,
+            UpdatedAt: DateTimeOffset.UtcNow));
+        var services = RunOnceTestServices.Valid(
+            blockOnAnyFailedMission: true,
+            missions: missions);
+
+        var result = services.Execute(new[] { "run-once" });
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("Refusing to start new work because mission github-41 is in status Failed.", result.Error);
+        Assert.False(services.WorkItems.WorkingMarked);
+    }
 }
 
 internal sealed class RunOnceTestServices
@@ -474,7 +502,8 @@ internal sealed class RunOnceTestServices
         IWorkItemDependencyResolver? dependencyResolver = null,
         FakeMissionRepository? missions = null,
         bool autoMerge = false,
-        string autoMergeMethod = "squash")
+        string autoMergeMethod = "squash",
+        bool blockOnAnyFailedMission = false)
     {
         var config = new AgentForemanConfig
         {
@@ -524,6 +553,10 @@ internal sealed class RunOnceTestServices
             {
                 Provider = "postgresql",
                 ConnectionString = "Host=localhost;Database=agent_foreman",
+            },
+            Daemon = new DaemonConfig
+            {
+                BlockOnAnyFailedMission = blockOnAnyFailedMission,
             },
         };
 

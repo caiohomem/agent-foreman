@@ -9,3 +9,4 @@
 **/tsconfig.tsbuildinfo
 .agent
 agent-foreman.yaml
+agent-foreman.docker.yaml

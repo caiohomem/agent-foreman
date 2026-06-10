@@ -10,6 +10,7 @@ public sealed class PostgresStateSchemaTests
     [InlineData("mission_logs")]
     [InlineData("mission_events")]
     [InlineData("agent_run_summaries")]
+    [InlineData("agent_lessons")]
     [InlineData("provider_states")]
     public void SchemaCreationScriptIncludesRequiredTables(string tableName)
     {

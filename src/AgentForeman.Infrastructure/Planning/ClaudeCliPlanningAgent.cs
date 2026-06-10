@@ -41,7 +41,7 @@ public sealed class ClaudeCliPlanningAgent : IPlanningAgent
                 result.ExitCode,
                 result.StartedAt,
                 result.FinishedAt,
-                string.IsNullOrWhiteSpace(result.StderrText) ? "Claude planner failed." : result.StderrText.Trim());
+                BuildErrorMessage(result));
     }
 
     private static IReadOnlyList<string> BuildArguments(string model, string prompt)
@@ -86,8 +86,29 @@ public sealed class ClaudeCliPlanningAgent : IPlanningAgent
             builder.AppendLine(request.AgentsContent);
         }
 
+        AppendLessons(builder, request.Lessons);
+
         return builder.ToString();
     }
+
+    private static void AppendLessons(StringBuilder builder, IReadOnlyList<AgentForeman.Core.State.Lesson>? lessons)
+    {
+        if (lessons is null || lessons.Count == 0) return;
+        builder.AppendLine();
+        builder.AppendLine("Lessons from previous runs (apply when relevant):");
+        foreach (var lesson in lessons)
+            builder.AppendLine($"- {lesson.Title}: {Truncate(lesson.Body, 500)}");
+    }
+
+    private static string BuildErrorMessage(CommandResult result)
+    {
+        var detail = !string.IsNullOrWhiteSpace(result.StderrText) ? result.StderrText.Trim() : result.StdoutText.Trim();
+        return string.IsNullOrWhiteSpace(detail)
+            ? $"Claude planner failed with exit code {result.ExitCode}."
+            : $"Claude planner failed with exit code {result.ExitCode}: {Truncate(detail, 2000)}";
+    }
+
+    private static string Truncate(string value, int max) => value.Length <= max ? value : value[^max..];
 
     private static string BuildLog(CommandResult result)
     {

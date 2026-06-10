@@ -451,3 +451,44 @@ Keep changes small and tied to the current mission workflow.
 Core owns mission concepts and provider abstractions. Infrastructure owns concrete adapters such as GitHub CLI, Claude CLI, Codex CLI, Git, PostgreSQL, and process execution.
 
 Do not commit secrets, modify `.env` files, merge pull requests automatically, or add future systems before their command behavior is being implemented.
+
+## Recovery And Memory
+
+Agent Foreman can use the configured Claude planner to classify failures and execute deterministic recovery actions:
+
+- Dirty worktrees are saved with a named `agent-foreman/recovery-*` Git stash before retrying.
+- Transient planning, branch preparation, and coding failures can be retried automatically.
+- Failing tests can return to the coding agent for up to `recovery.testRepairAttempts` repair cycles.
+- Recovery diagnoses and outcomes are recorded as mission events.
+- Reusable lessons are stored in PostgreSQL and injected into future planning and coding prompts.
+- Resume context from the previous run summary can be injected when a mission resumes.
+
+Configure the features in YAML:
+
+```yaml
+recovery:
+  enabled: true
+  maxAttempts: 2
+  testRepairAttempts: 2
+  model: ""
+
+memory:
+  enabled: true
+  topKLessons: 3
+  injectResumeContext: true
+```
+
+### RAG Phase 1
+
+The current retrieval implementation uses PostgreSQL full-text search over `agent_lessons`. `ILessonRepository.SearchAsync` hides the retrieval strategy from the orchestrator and prompt builders.
+
+### RAG Phase 2
+
+For hybrid retrieval:
+
+1. Replace the PostgreSQL image with `pgvector/pgvector:pg16`.
+2. Add an `embedding vector(1024)` column to `agent_lessons`.
+3. Add a configurable embedding provider.
+4. Combine FTS rank and cosine similarity inside `ILessonRepository.SearchAsync`.
+
+The orchestrator and prompt callers can continue using the existing interface without changes.

@@ -14,4 +14,6 @@ public interface IGitRepository
     Task AddAllAsync(string repoPath, CancellationToken cancellationToken = default);
     Task<GitCommitResult> CommitAsync(string repoPath, string message, CancellationToken cancellationToken = default);
     Task PushAsync(string repoPath, string remote, string branch, CancellationToken cancellationToken = default);
+    Task<bool> StashAsync(string repoPath, string message, CancellationToken cancellationToken = default) =>
+        Task.FromResult(false);
 }

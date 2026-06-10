@@ -1,11 +1,11 @@
 project:
-  name: elevator-ads-mvp
-  repoPath: /home/caioh/ai-lab/elevator-ads-mvp
+  name: financial-app
+  repoPath: /home/caioh/financial-app
   defaultBranch: main
 
 workItems:
   provider: github
-  repo: caiohomem/elevator-ads-mvp
+  repo: caiohomem/financial-app
   readyLabel: agent-ready
   workingLabel: agent-working
   reviewLabel: agent-review
@@ -25,20 +25,18 @@ executor:
   approval: never
 
 tests:
-  commands:
-    - dotnet test /home/caioh/ai-lab/elevator-ads-mvp/backend/ElevatorAds.sln
-    - npm --prefix frontend/elevator-ads-admin run build
+  commands: []
 
 safety:
   maxFilesChanged: 100
+  autoMergeAfterChecks: true
+  autoMergeMethod: squash
   forbiddenPaths:
     - .env
     - .env.local
     - .env.production
     - appsettings.Production.json
     - secrets/
-  autoMergeAfterChecks: true
-  autoMergeMethod: squash
 
 quota:
   retryAfterHours: 5
@@ -52,11 +50,10 @@ quota:
 
 database:
   provider: postgresql
-  connectionString: Host=localhost;Port=5432;Database=agent_foreman;Username=agent_foreman;Password=agent_foreman
+  connectionString: Host=localhost;Port=5432;Database=agent_foreman_financial_app;Username=agent_foreman;Password=agent_foreman
 
 daemon:
   pollIntervalSeconds: 30
-  blockOnAnyFailedMission: false
 
 recovery:
   enabled: true

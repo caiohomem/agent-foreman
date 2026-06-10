@@ -11,6 +11,8 @@ public sealed class AgentForemanConfig
     public QuotaConfig Quota { get; init; } = new();
     public DatabaseConfig Database { get; init; } = new();
     public DaemonConfig Daemon { get; init; } = new();
+    public RecoveryConfig Recovery { get; init; } = new();
+    public MemoryConfig Memory { get; init; } = new();
 }
 
 public sealed class ProjectConfig
@@ -78,4 +80,20 @@ public sealed class DaemonConfig
     public bool Enabled { get; init; } = true;
     public int PollIntervalSeconds { get; init; } = 300;
     public bool RunOnStartup { get; init; } = true;
+    public bool BlockOnAnyFailedMission { get; init; } = false;
+}
+
+public sealed class RecoveryConfig
+{
+    public bool Enabled { get; init; } = false;
+    public int MaxAttempts { get; init; } = 2;
+    public int TestRepairAttempts { get; init; } = 2;
+    public string Model { get; init; } = string.Empty;
+}
+
+public sealed class MemoryConfig
+{
+    public bool Enabled { get; init; } = false;
+    public int TopKLessons { get; init; } = 3;
+    public bool InjectResumeContext { get; init; } = true;
 }
